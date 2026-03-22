@@ -8,20 +8,13 @@ st.set_page_config(page_title="Gold Factor Dashboard", layout="wide")
 
 st.title("🪙 금(Gold) 팩터 및 동향 대시보드")
 
-# 1. 국제 금 데이터 및 환율 데이터 로드 (Session 위장 및 캐싱)
-# ttl=3600을 넣으면 1시간 동안은 서버에 다시 요청하지 않고 기존 데이터를 써서 차단 확률을 낮춤
-@st.cache_data(ttl=3600) 
+# 1. 국제 금 데이터 및 환율 데이터 로드 (yfinance 자체 우회 기능 사용)
+@st.cache_data(ttl=3600)
 def load_historical_data():
     try:
-        # 야후 파이낸스 전용 세션 생성 및 위장
-        session = requests.Session()
-        session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        })
-        
-        # session=session 파라미터를 추가하여 호출
-        xau = yf.Ticker("GC=F", session=session).history(period="2y")['Close']
-        krw = yf.Ticker("KRW=X", session=session).history(period="2y")['Close']
+        # Session 코드를 전부 지우고 yfinance 기본 호출 방식으로 복구합니다.
+        xau = yf.Ticker("GC=F").history(period="2y")['Close']
+        krw = yf.Ticker("KRW=X").history(period="2y")['Close']
         
         xau.index = pd.to_datetime(xau.index).tz_localize(None).normalize()
         krw.index = pd.to_datetime(krw.index).tz_localize(None).normalize()
