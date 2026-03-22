@@ -8,43 +8,51 @@ st.set_page_config(page_title="Gold Factor Dashboard", layout="wide")
 
 st.title("🪙 금(Gold) 팩터 및 동향 대시보드")
 
-# 1. 국제 금 데이터 및 환율 데이터 로드 (yfinance)
-@st.cache_data
+# 1. 국제 금 데이터 및 환율 데이터 로드 (Session 위장 및 캐싱)
+# ttl=3600을 넣으면 1시간 동안은 서버에 다시 요청하지 않고 기존 데이터를 써서 차단 확률을 낮춤
+@st.cache_data(ttl=3600) 
 def load_historical_data():
     try:
-        xau = yf.Ticker("GC=F").history(period="2y")['Close']
-        krw = yf.Ticker("KRW=X").history(period="2y")['Close']
+        # 야후 파이낸스 전용 세션 생성 및 위장
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        })
         
-        # [핵심 수정] 시간대(Timezone) 제거 및 데이터 정렬
-        # 금 거래소와 외환 시장의 기준 시간이 달라 병합 시 데이터가 날아가는 현상 방지
+        # session=session 파라미터를 추가하여 호출
+        xau = yf.Ticker("GC=F", session=session).history(period="2y")['Close']
+        krw = yf.Ticker("KRW=X", session=session).history(period="2y")['Close']
+        
         xau.index = pd.to_datetime(xau.index).tz_localize(None).normalize()
         krw.index = pd.to_datetime(krw.index).tz_localize(None).normalize()
         
         df = pd.DataFrame({'XAU_USD_oz': xau, 'USD_KRW': krw})
-        
-        # 휴일 등으로 인한 빈칸은 이전 날짜 가격으로 채우기 (Forward Fill)
         df = df.ffill().dropna()
         
-        # 단위 변환 (1 Troy Ounce = 31.1034768g)
         OZ_TO_GRAM = 31.1034768
         df['XAU_USD_g'] = df['XAU_USD_oz'] / OZ_TO_GRAM
-        df['XAU_KRW_g'] = df['XAU_USD_g'] * df['USD_KRW'] # 국제 금의 원화 환산가(g당)
+        df['XAU_KRW_g'] = df['XAU_USD_g'] * df['USD_KRW']
         
         return df
     except Exception as e:
-        # 에러 발생 시 대시보드 화면에 상세 에러 내용 출력
         st.error(f"데이터 로딩 상세 에러: {e}")
         return pd.DataFrame()
 
-# 2. 국내 금 현재가 크롤링 (네이버 금융 신한은행 고시가 기준)
+# 2. 국내 금 현재가 크롤링 (차단 우회 강화 버전)
 def get_current_domestic_gold():
     try:
         url = "https://finance.naver.com/marketindex/"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+        # 헤더를 실제 브라우저와 완벽하게 동일하게 위장
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Referer': 'https://finance.naver.com/' # 네이버에서 넘어온 것처럼 속임
+        }
         res = requests.get(url, headers=headers, timeout=5)
-        soup = BeautifulSoup(res.text, 'html.parser')
+        res.raise_for_status() # 접속 실패 시 즉각 에러 발생시켜서 원인 파악
         
-        # [핵심 수정] 올려주신 HTML 구조에 맞춰 클래스명을 정확히 gold_domestic으로 지정
+        soup = BeautifulSoup(res.text, 'html.parser')
         gold_str = soup.select_one('a.gold_domestic .value').text
         return float(gold_str.replace(',', ''))
     except Exception as e:
