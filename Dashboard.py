@@ -56,7 +56,7 @@ def get_current_domestic_gold():
 def load_macro_data():
     try:
         end = datetime.datetime.now()
-        start = end - datetime.timedelta(days=365*3) # 추이를 보기 위해 3년치 로드
+        start = end - datetime.timedelta(days=365*5) # 추이를 보기 위해 5년치 로드
 
         # FRED 매크로 지표 (DFII10: 10년물 실질금리, M2SL: M2 유동성, CPIAUCSL: 소비자물가지수)
         fred_df = web.DataReader(['DFII10', 'M2SL', 'CPIAUCSL'], 'fred', start, end)
