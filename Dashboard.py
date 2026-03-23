@@ -14,8 +14,8 @@ st.title("🪙 금(Gold) 팩터 및 동향 대시보드")
 @st.cache_data(ttl=3600)
 def load_historical_data():
     try:
-        xau = yf.Ticker("GC=F").history(period="3y")['Close']
-        krw = yf.Ticker("KRW=X").history(period="3y")['Close']
+        xau = yf.Ticker("GC=F").history(period="2y")['Close']
+        krw = yf.Ticker("KRW=X").history(period="2y")['Close']
         
         xau.index = pd.to_datetime(xau.index).tz_localize(None).normalize()
         krw.index = pd.to_datetime(krw.index).tz_localize(None).normalize()
