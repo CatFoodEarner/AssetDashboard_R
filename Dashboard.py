@@ -8,7 +8,6 @@ import datetime
 import time
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from pykrx import stock
 import FinanceDataReader as fdr
 
 st.set_page_config(page_title="Asset Factor Dashboard", layout="wide")
