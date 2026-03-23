@@ -5,6 +5,8 @@ import requests
 from bs4 import BeautifulSoup
 import pandas_datareader.data as web
 import datetime
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 st.set_page_config(page_title="Gold Factor Dashboard", layout="wide")
 
@@ -134,6 +136,40 @@ if not fred_df.empty and not ief.empty:
         st.line_chart(fred_df['Real_M2'], height=250)
 
 st.markdown("---")
-if not df.empty:
-    st.subheader("📉 국제 금 가격(USD/oz) 장기 추이")
-    st.line_chart(df[['XAU_USD_oz']], height=400)
+
+# 데이터가 모두 정상적으로 로드되었을 때만 차트 그리기
+if not df.empty and not fred_df.empty:
+    st.subheader("📉 국제 금(USD) vs 미 실질금리 팩터 분석")
+    
+    # 금 데이터와 매크로 데이터의 날짜를 맞춰서 병합 (Inner Join)
+    combined_df = df.join(fred_df, how='inner')
+    
+    # 이중 축 차트 뼈대 만들기
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+
+    # 1. 왼쪽 축: 국제 금 가격 (금색 실선)
+    fig.add_trace(
+        go.Scatter(x=combined_df.index, y=combined_df['XAU_USD_oz'], name="국제 금 (USD/oz)", line=dict(color="#FFD700", width=2)),
+        secondary_y=False,
+    )
+
+    # 2. 오른쪽 축: 10년물 실질금리 (파란색 점선)
+    fig.add_trace(
+        go.Scatter(x=combined_df.index, y=combined_df['DFII10'], name="10년물 실질금리 (%)", line=dict(color="#1f77b4", dash="dot", width=2)),
+        secondary_y=True,
+    )
+
+    # 레이아웃 및 축 설정
+    fig.update_layout(
+        height=500,
+        margin=dict(l=20, r=20, t=30, b=20),
+        hovermode="x unified", # 마우스를 올렸을 때 두 값을 동시에 보여줌
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+    
+    # y축 이름 및 설정 (실질금리 축은 직관적인 비교를 위해 뒤집음)
+    fig.update_yaxes(title_text="금 가격 (USD/oz)", secondary_y=False)
+    fig.update_yaxes(title_text="실질금리 (%) - 뒤집힘(역축)", autorange="reversed", showgrid=False, secondary_y=True)
+
+    # Streamlit에 차트 띄우기
+    st.plotly_chart(fig, use_container_width=True)
