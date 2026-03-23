@@ -127,10 +127,10 @@ if not fred_df.empty and not ief.empty:
 
     col_chart1, col_chart2 = st.columns(2)
     with col_chart1:
-        st.markdown("**📉 미국 10년물 실질금리 3년 추이**")
+        st.markdown("**📉 미국 10년물 실질금리 5년 추이**")
         st.line_chart(fred_df['DFII10'], height=250)
     with col_chart2:
-        st.markdown("**🌊 미국 실질 M2 3년 추이 (물가조정 유동성)**")
+        st.markdown("**🌊 미국 실질 M2 5년 추이 (물가조정 유동성)**")
         st.line_chart(fred_df['Real_M2'], height=250)
 
 st.markdown("---")
