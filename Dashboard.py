@@ -27,8 +27,8 @@ def load_gold_data():
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            xau = yf.Ticker("GC=F").history(period="6y")['Close']
-            krw = yf.Ticker("KRW=X").history(period="6y")['Close']
+            xau = yf.Ticker("GC=F").history(period="10y")['Close']
+            krw = yf.Ticker("KRW=X").history(period="10y")['Close']
             if xau.empty or krw.empty: raise ValueError("빈 데이터 반환")
             xau.index = pd.to_datetime(xau.index).tz_localize(None).normalize()
             krw.index = pd.to_datetime(krw.index).tz_localize(None).normalize()
