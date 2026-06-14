@@ -44,30 +44,28 @@ def load_gold_data():
 # 매크로 및 IEF 데이터 로드 (FinanceDataReader로 교체)
 # ==========================================
 @st.cache_data(ttl=3600)
-
 def load_macro_data():
     try:
         import FinanceDataReader as fdr
         end = datetime.datetime.now()
-        start = end - datetime.timedelta(days=365*3)
+        
+        # [수정] 데이터를 3년치에서 10년치로 넉넉하게 불러옵니다.
+        start = end - datetime.timedelta(days=365*10) 
 
-        # pandas-datareader 대신 fdr의 FRED 기능을 사용하여 각각 불러옴
         dfii10 = fdr.DataReader('FRED:DFII10', start, end).iloc[:, 0]
         m2sl = fdr.DataReader('FRED:M2SL', start, end).iloc[:, 0]
         cpiaucsl = fdr.DataReader('FRED:CPIAUCSL', start, end).iloc[:, 0]
 
-        # 세 데이터를 하나의 DataFrame으로 조립
         fred_df = pd.DataFrame({
             'DFII10': dfii10,
             'M2SL': m2sl,
             'CPIAUCSL': cpiaucsl
         }).ffill().dropna()
         
-        # 실질 M2 계산 = (명목 M2 / CPI) * 100
         fred_df['Real_M2'] = (fred_df['M2SL'] / fred_df['CPIAUCSL']) * 100
 
-        # IEF (미국 7-10년물 국채 ETF) 종가
-        ief = yf.Ticker("IEF").history(period="3y")['Close']
+        # [수정] IEF (미국 7-10년물 국채 ETF) 기간도 "10y"로 변경
+        ief = yf.Ticker("IEF").history(period="10y")['Close']
         ief.index = pd.to_datetime(ief.index).tz_localize(None).normalize()
 
         return fred_df, ief
