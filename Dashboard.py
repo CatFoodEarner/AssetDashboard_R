@@ -27,8 +27,8 @@ def load_gold_data():
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            xau = yf.Ticker("GC=F").history(period="2y")['Close']
-            krw = yf.Ticker("KRW=X").history(period="2y")['Close']
+            xau = yf.Ticker("GC=F").history(period="6y")['Close']
+            krw = yf.Ticker("KRW=X").history(period="6y")['Close']
             if xau.empty or krw.empty: raise ValueError("빈 데이터 반환")
             xau.index = pd.to_datetime(xau.index).tz_localize(None).normalize()
             krw.index = pd.to_datetime(krw.index).tz_localize(None).normalize()
@@ -325,11 +325,11 @@ if page == "🪙 금 (Gold)":
 
         col_chart1, col_chart2 = st.columns(2)
         with col_chart1:
-            st.markdown("**📉 미국 10년물 실질금리 5년 추이**")
+            st.markdown("**📉 미국 10년물 실질금리 추이**")
             st.line_chart(fred_df['DFII10'], height=250)
             
         with col_chart2:
-            st.markdown("**🌊 미국 실질 M2 5년 추이 (물가조정 유동성)**")
+            st.markdown("**🌊 미국 실질 M2 추이 (물가조정 유동성)**")
             # [수정됨] st.line_chart 대신 Plotly를 사용하여 Y축 스케일을 데이터에 딱 맞게 타이트하게 자동 조절합니다.
             import plotly.graph_objects as go
             fig_m2 = go.Figure()
