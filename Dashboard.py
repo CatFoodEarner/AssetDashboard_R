@@ -259,6 +259,10 @@ def load_korean_market_data():
             df.loc[today_date, 'VKOSPI'] = current_vkospi
             
         df = df.sort_index(ascending=True)
+        
+        # [신규] 숫자로 변환하기 전에, 모든 데이터에 섞여 있는 쉼표(,)를 강제로 지워버립니다.
+        df = df.replace(',', '', regex=True) 
+        
         df = df.astype(float)
         return df.ffill().dropna(how='all')
         
