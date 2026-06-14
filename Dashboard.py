@@ -256,7 +256,7 @@ def load_korean_market_data():
             df.loc[today_date, 'KOSPI200'] = current_korean['KOSPI200']
             df.loc[today_date, 'KOSDAQ'] = current_korean['KOSDAQ']
             df.loc[today_date, 'KOSPI4'] = current_kospi4
-            df.loc[today_date, 'VKOSPI'] = current_vkospi
+            df.loc[today_date, 'V-KOSPI'] = current_vkospi
             
         df = df.sort_index(ascending=True)
         
