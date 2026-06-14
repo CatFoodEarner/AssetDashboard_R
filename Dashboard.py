@@ -259,7 +259,7 @@ def load_korean_market_data():
             df.loc[today_date, 'VKOSPI'] = current_vkospi
             
         df = df.sort_index(ascending=True)
-        # df = df.astype(float)
+        df = df.astype(float)
         return df.ffill().dropna(how='all')
         
     except Exception as e:
