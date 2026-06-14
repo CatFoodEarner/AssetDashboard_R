@@ -308,6 +308,8 @@ if page == "🪙 금 (Gold)":
 
         st.markdown("---")
 
+# (앞부분 금 가격 메트릭 카드들은 그대로 둡니다)
+    
     # 새롭게 추가된 매크로 팩터 섹션
     if not fred_df.empty and not ief.empty:
         st.subheader("🦅 금 핵심 매크로 팩터 (실질금리, 유동성, 미국채)")
@@ -327,51 +329,79 @@ if page == "🪙 금 (Gold)":
         with col_chart1:
             st.markdown("**📉 미국 10년물 실질금리 5년 추이**")
             st.line_chart(fred_df['DFII10'], height=250)
+            
         with col_chart2:
             st.markdown("**🌊 미국 실질 M2 5년 추이 (물가조정 유동성)**")
-            st.line_chart(fred_df['Real_M2'], height=250)
-
+            # [수정됨] st.line_chart 대신 Plotly를 사용하여 Y축 스케일을 데이터에 딱 맞게 타이트하게 자동 조절합니다.
+            import plotly.graph_objects as go
+            fig_m2 = go.Figure()
+            fig_m2.add_trace(go.Scatter(x=fred_df.index, y=fred_df['Real_M2'], line=dict(color="#2ca02c", width=2)))
+            fig_m2.update_layout(height=250, margin=dict(l=10, r=10, t=10, b=10), yaxis=dict(autorange=True))
+            st.plotly_chart(fig_m2, use_container_width=True)
 
     st.markdown("---")
 
     # 데이터가 모두 정상적으로 로드되었을 때만 차트 그리기
     if not df.empty and not fred_df.empty:
-        st.subheader("📉 국제 금(USD) vs 미 실질금리 팩터 분석")
+        st.subheader("📉 국제 금(USD) 매크로 팩터 분석")
         
         # 금 데이터와 매크로 데이터의 날짜를 맞춰서 병합 (Inner Join)
         combined_df = df.join(fred_df, how='inner')
         
-        # 이중 축 차트 뼈대 만들기
-        fig = make_subplots(specs=[[{"secondary_y": True}]])
-
-        # 1. 왼쪽 축: 국제 금 가격 (금색 실선)
-        fig.add_trace(
-            go.Scatter(x=combined_df.index, y=combined_df['XAU_USD_oz'], name="국제 금 (USD/oz)", line=dict(color="#FFD700", width=2)),
-            secondary_y=False,
-        )
-
-        # 2. 오른쪽 축: 10년물 실질금리 (파란색 점선)
-        fig.add_trace(
-            go.Scatter(x=combined_df.index, y=combined_df['DFII10'], name="10년물 실질금리 (%)", line=dict(color="#1f77b4", dash="dot", width=2)),
-            secondary_y=True,
-        )
-
-        # 레이아웃 및 축 설정
-        fig.update_layout(
-            height=500,
-            margin=dict(l=20, r=20, t=30, b=20),
-            hovermode="x unified", # 마우스를 올렸을 때 두 값을 동시에 보여줌
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-        )
+        # [신규] YoY (전년 대비 증감률) 계산 (252 거래일 기준)
+        combined_df['Gold_YoY'] = combined_df['XAU_USD_oz'].pct_change(periods=252) * 100
+        combined_df['M2_YoY'] = combined_df['Real_M2'].pct_change(periods=252) * 100
         
-        # y축 이름 및 설정 (실질금리 축은 직관적인 비교를 위해 뒤집음)
-        fig.update_yaxes(title_text="금 가격 (USD/oz)", secondary_y=False)
-        fig.update_yaxes(title_text="실질금리 (%) - 뒤집힘(역축)", autorange="reversed", showgrid=False, secondary_y=True)
+        # 보기 편하게 두 개의 탭으로 분리
+        tab_macro1, tab_macro2 = st.tabs(["🥇 금 vs 실질금리 (Price)", "🌊 금 vs 실질 M2 (YoY 모멘텀)"])
 
-        # Streamlit에 차트 띄우기
-        st.plotly_chart(fig, use_container_width=True)        
+        with tab_macro1:
+            # 기존 이중 축 차트 뼈대 만들기 (금 가격 vs 실질금리)
+            from plotly.subplots import make_subplots
+            fig1 = make_subplots(specs=[[{"secondary_y": True}]])
+
+            fig1.add_trace(
+                go.Scatter(x=combined_df.index, y=combined_df['XAU_USD_oz'], name="국제 금 (USD/oz)", line=dict(color="#FFD700", width=2)),
+                secondary_y=False,
+            )
+            fig1.add_trace(
+                go.Scatter(x=combined_df.index, y=combined_df['DFII10'], name="10년물 실질금리 (%)", line=dict(color="#1f77b4", dash="dot", width=2)),
+                secondary_y=True,
+            )
+
+            fig1.update_layout(
+                height=500, margin=dict(l=20, r=20, t=30, b=20), hovermode="x unified",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+            fig1.update_yaxes(title_text="금 가격 (USD/oz)", secondary_y=False)
+            fig1.update_yaxes(title_text="실질금리 (%) - 뒤집힘(역축)", autorange="reversed", showgrid=False, secondary_y=True)
+
+            st.plotly_chart(fig1, use_container_width=True)        
+
+        with tab_macro2:
+            # [신규] 두 번째 탭: 금 YoY vs M2 YoY 이중 축 차트
+            fig2 = make_subplots(specs=[[{"secondary_y": True}]])
+
+            fig2.add_trace(
+                go.Scatter(x=combined_df.index, y=combined_df['Gold_YoY'], name="국제 금 YoY (%)", line=dict(color="#FFD700", width=2)),
+                secondary_y=False,
+            )
+            fig2.add_trace(
+                go.Scatter(x=combined_df.index, y=combined_df['M2_YoY'], name="실질 M2 YoY (%)", line=dict(color="#2ca02c", dash="dot", width=2)),
+                secondary_y=True,
+            )
+
+            fig2.update_layout(
+                height=500, margin=dict(l=20, r=20, t=30, b=20), hovermode="x unified",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+            fig2.update_yaxes(title_text="금 상승률 YoY (%)", secondary_y=False)
+            fig2.update_yaxes(title_text="유동성(M2) 증감률 YoY (%)", showgrid=False, secondary_y=True)
+
+            st.plotly_chart(fig2, use_container_width=True)
 
 elif page == "🇰🇷 한국 주식 (KOSPI)":
+    # (한국 주식 코드는 기존 그대로 유지합니다)
     st.title("🇰🇷 한국 주식 (KOSPI) 팩터 대시보드")
     
     # 1. 이제 모든 지수(V-KOSPI 포함)가 kr_df 하나에 담겨서 나옵니다.
