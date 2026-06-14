@@ -471,8 +471,8 @@ elif page == "🇰🇷 한국 주식 (KOSPI)":
         m_col1, m_col2, m_col3 = st.columns(3)
         
         # 통합된 kr_df에서 V-KOSPI 꺼내 쓰기
-        if 'VKOSPI' in kr_df.columns and not kr_df['VKOSPI'].dropna().empty:
-            m_col1.metric("V-KOSPI (변동성 지수)", f"{kr_df['VKOSPI'].dropna().iloc[-1]:.2f}")
+        if 'V-KOSPI' in kr_df.columns and not kr_df['V-KOSPI'].dropna().empty:
+            m_col1.metric("V-KOSPI (변동성 지수)", f"{kr_df['V-KOSPI'].dropna().iloc[-1]:.2f}")
         else:
             m_col1.metric("V-KOSPI (변동성 지수)", "수집 불가")
             
@@ -489,9 +489,9 @@ elif page == "🇰🇷 한국 주식 (KOSPI)":
         # m_col3.metric("Aggregate Investor Allocation", "데이터 연동 대기 중", "시총 / (부채+시총)")
 
         # V-KOSPI 차트는 컬럼 밖으로 빼서 가로로 길게 보는 것이 예쁩니다.
-        if 'VKOSPI' in kr_df.columns and not kr_df['VKOSPI'].dropna().empty:
+        if 'V-KOSPI' in kr_df.columns and not kr_df['V-KOSPI'].dropna().empty:
             st.markdown("**📉 V-KOSPI 1년 추이**")
-            st.line_chart(kr_df['VKOSPI'].dropna().tail(252), height=200)
+            st.line_chart(kr_df['V-KOSPI'].dropna().tail(252), height=200)
 
         # --- 4. 밸류에이션 (PER, PBR 표) ---
         st.markdown("---")
