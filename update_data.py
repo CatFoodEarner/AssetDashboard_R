@@ -58,27 +58,20 @@ def get_current_vkospi():
         print(f"V-KOSPI 우회 에러: {e}")
         return None
 
-# --- 방어막이 추가된 메인 업데이트 로직 ---
+# --- 궁극의 업데이트 로직 (시간 지연 완벽 방어) ---
 def update_csv():
-    # 1. 깃허브 서버(UTC) 기준이 아닌, 완벽한 한국 시간(KST) 구하기
-    KST = timezone(timedelta(hours=9))
-    today_kst = datetime.now(KST).date()
-    today_str = today_kst.strftime("%Y-%m-%d")
-
-    # 2. 네이버 증권에서 '실제로 장이 열린 기준일' 확인하기
+    # 1. 네이버 증권에서 '실제로 장이 열린 기준일' 가져오기 (진실의 시계)
     url = "https://finance.naver.com/sise/"
     headers = {'User-Agent': 'Mozilla/5.0'}
     res = requests.get(url, headers=headers, timeout=5)
     soup = BeautifulSoup(res.text, 'html.parser')
     
     market_date_str = soup.select_one('#time1').text.strip()[:10].replace('.', '-')
+    
+    # 💡 봇의 실행 시간이 아닌, '시장이 열린 날짜'를 인덱스 이름표로 무조건 사용합니다!
+    market_dt = pd.to_datetime(market_date_str) 
 
-    # 3. [휴장일 방어막]
-    if today_str != market_date_str:
-        print(f"오늘은 휴장일(공휴일/주말)입니다. 업데이트를 건너뜁니다. (시장 열린 날: {market_date_str} / 오늘: {today_str})")
-        return 
-
-    # 4. CSV 불러오기
+    # 2. CSV 불러오기
     try: df = pd.read_csv('KPRICE.csv', encoding='utf-8')
     except: df = pd.read_csv('KPRICE.csv', encoding='cp949')
 
@@ -86,30 +79,26 @@ def update_csv():
     df['Date'] = pd.to_datetime(df['Date'])
     df = df.set_index('Date')
 
-    # 5. 크롤링 시도
+    # 3. 크롤링 시도
     kr = get_current_korean_indices()
     ko4 = get_current_kospi4()
-    vk = get_current_vkospi()
+    vk = get_current_vkospi() # (우회 도구 적용된 함수)
     
-    # 💡 봇이 어디서 막혔는지 깃허브 로그에서 볼 수 있도록 기록을 남깁니다.
-    print(f"📊 수집 상태 확인 -> 네이버: {kr is not None}, 야후(소형주): {ko4 is not None}, 인베스팅(V-KOSPI): {vk is not None}")
+    print(f"📊 수집 상태 -> 네이버: {kr is not None}, 야후: {ko4 is not None}, V-KOSPI: {vk is not None}")
 
-    # 6. [핵심] 가장 믿음직한 네이버(kr)만 성공해도 무조건 오늘 행을 만듭니다.
+    # 4. 데이터 덮어쓰기 (핵심: today_dt가 아니라 market_dt 위치에 넣습니다)
     if kr:
-        today_dt = pd.to_datetime(today_kst)
-        df.loc[today_dt, 'KOSPI'] = kr['KOSPI']
-        df.loc[today_dt, 'KOSPI200'] = kr['KOSPI200']
-        df.loc[today_dt, 'KOSDAQ'] = kr['KOSDAQ']
+        df.loc[market_dt, 'KOSPI'] = kr['KOSPI']
+        df.loc[market_dt, 'KOSPI200'] = kr['KOSPI200']
+        df.loc[market_dt, 'KOSDAQ'] = kr['KOSDAQ']
         
-        # 야후와 인베스팅은 성공했을 때만 넣습니다. 
-        # (실패해서 빈칸이 되면 아래 ffill()이 자동으로 어제 가격으로 메워줍니다.)
-        if ko4: df.loc[today_dt, 'KOSPI4'] = ko4
-        if vk: df.loc[today_dt, 'V-KOSPI'] = vk
+        if ko4: df.loc[market_dt, 'KOSPI4'] = ko4
+        if vk: df.loc[market_dt, 'V-KOSPI'] = vk
 
-    # 7. 빈칸 채우고 저장하기
+    # 5. 빈칸 채우고 저장하기
     df = df.sort_index(ascending=True).ffill().dropna(how='all')
     df.to_csv('KPRICE.csv', encoding='utf-8')
-    print(f"✅ 정상 영업일 업데이트 완료: {today_str}")
+    print(f"✅ 업데이트 완료 (기준일: {market_date_str})")
 
 if __name__ == "__main__":
     update_csv()
