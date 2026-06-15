@@ -123,23 +123,33 @@ def get_current_domestic_gold():
 
 def get_current_vkospi():
     try:
-        url = "https://kr.investing.com/indices/kospi-volatility"
-        # Investing.com의 강력한 봇 차단을 뚫기 위한 한국어 + 최신 브라우저 위장 헤더
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
-        }
-        res = requests.get(url, headers=headers, timeout=5)
+        # cloudscraper 우회 시도, 실패 시 일반 requests 방식 적용
+        try:
+            import cloudscraper
+            scraper = cloudscraper.create_scraper(
+                browser={
+                    'browser': 'chrome',
+                    'platform': 'windows',
+                    'desktop': True
+                }
+            )
+            url = "https://kr.investing.com/indices/kospi-volatility"
+            res = scraper.get(url, timeout=5)
+        except ImportError:
+            url = "https://kr.investing.com/indices/kospi-volatility"
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+            }
+            res = requests.get(url, headers=headers, timeout=5)
+            
         soup = BeautifulSoup(res.text, 'html.parser')
-        
-        # 선생님이 찾으신 고유 속성 data-test="instrument-price-last" 로 타겟팅
         price_element = soup.select_one('[data-test="instrument-price-last"]')
         
         if price_element:
             return float(price_element.text.replace(',', ''))
-        else:
-            return None
+        return None
     except Exception as e:
         return None
     
@@ -237,8 +247,12 @@ def get_current_kospi4():
 @st.cache_data(ttl=3600)
 def load_korean_market_data():
     try:
-        # 1. 과거 시계열 CSV 불러오기
-        df = pd.read_csv('KPRICE.csv', encoding='cp949')
+        # 1. 과거 시계열 CSV 불러오기 (인코딩 다중 지원으로 에러 방지)
+        try:
+            df = pd.read_csv('KPRICE.csv', encoding='utf-8')
+        except Exception:
+            df = pd.read_csv('KPRICE.csv', encoding='cp949')
+            
         df['Date'] = pd.to_datetime(df['Date'])
         df = df.set_index('Date')
         
@@ -248,15 +262,18 @@ def load_korean_market_data():
         current_vkospi = get_current_vkospi()         # 인베스팅 (V-KOSPI)
         
         # 3. 크롤링 성공 시, 오늘 날짜로 데이터 한 줄 추가 (Append)
-        if current_korean and current_kospi4 and current_vkospi:
+        # 💡 [개선] 3가지 소스 중 일부가 실패해도 개별적으로 채워넣을 수 있도록 완화
+        if current_korean or current_kospi4 or current_vkospi:
             today_date = pd.to_datetime(datetime.date.today())
             
-            # CSV 컬럼 이름에 맞게 세팅 (순서나 이름은 CSV 파일과 동일해야 함)
-            df.loc[today_date, 'KOSPI'] = current_korean['KOSPI']
-            df.loc[today_date, 'KOSPI200'] = current_korean['KOSPI200']
-            df.loc[today_date, 'KOSDAQ'] = current_korean['KOSDAQ']
-            df.loc[today_date, 'KOSPI4'] = current_kospi4
-            df.loc[today_date, 'V-KOSPI'] = current_vkospi
+            if current_korean:
+                df.loc[today_date, 'KOSPI'] = current_korean.get('KOSPI')
+                df.loc[today_date, 'KOSPI200'] = current_korean.get('KOSPI200')
+                df.loc[today_date, 'KOSDAQ'] = current_korean.get('KOSDAQ')
+            if current_kospi4 is not None:
+                df.loc[today_date, 'KOSPI4'] = current_kospi4
+            if current_vkospi is not None:
+                df.loc[today_date, 'V-KOSPI'] = current_vkospi
             
         df = df.sort_index(ascending=True)
         
@@ -269,6 +286,47 @@ def load_korean_market_data():
     except Exception as e:
         st.error(f"한국 주식 데이터 로딩 에러: {e}")
         return pd.DataFrame()
+
+# ==========================================
+# 8. 한국 주식 밸류에이션 데이터 로드 (실데이터 KVALUATION.csv 연동 및 폴백)
+# ==========================================
+@st.cache_data(ttl=86400)
+def load_valuation_data():
+    import os
+    csv_file = 'KVALUATION.csv'
+    
+    # 1. 수집된 KVALUATION.csv 파일이 존재하는 경우 로드 및 가공
+    if os.path.exists(csv_file):
+        try:
+            try:
+                df = pd.read_csv(csv_file, encoding='utf-8')
+            except Exception:
+                df = pd.read_csv(csv_file, encoding='cp949')
+                
+            df['Date'] = pd.to_datetime(df['Date'])
+            df = df.set_index('Date')
+            
+            # 최근 1년 월말 데이터로 다운샘플링하여 최종 12개월 표기
+            monthly_df = df.resample('ME').last()
+            return monthly_df.tail(12)
+        except Exception as e:
+            st.warning(f"KVALUATION.csv 파싱 실패: {e}. 임시 모형 데이터를 표시합니다.")
+            
+    # 2. 파일이 없거나 로드 오류 시 대시보드 크래시 방지를 위한 Mock 데이터 반환
+    dates = pd.date_range(end=datetime.date.today(), periods=12, freq='ME')
+    data = {
+        "KOSPI 전체 PER": [11.2, 10.8, 11.5, 12.1, 11.9, 11.4, 10.9, 11.1, 11.5, 11.8, 12.0, 11.7],
+        "대형주 PER": [12.1, 11.5, 12.3, 13.0, 12.7, 12.2, 11.6, 11.9, 12.4, 12.7, 12.9, 12.5],
+        "중형주 PER": [9.5, 9.2, 9.7, 10.1, 9.9, 9.6, 9.1, 9.3, 9.6, 9.8, 10.0, 9.7],
+        "소형주 PER": [8.2, 8.0, 8.4, 8.7, 8.5, 8.3, 7.9, 8.1, 8.3, 8.5, 8.7, 8.4],
+        "KOSPI 전체 PBR": [0.95, 0.92, 0.97, 1.01, 0.99, 0.96, 0.91, 0.93, 0.96, 0.98, 1.00, 0.97],
+        "대형주 PBR": [1.05, 1.01, 1.07, 1.12, 1.10, 1.06, 1.01, 1.03, 1.07, 1.09, 1.11, 1.08],
+        "중형주 PBR": [0.78, 0.75, 0.79, 0.82, 0.80, 0.78, 0.74, 0.76, 0.79, 0.81, 0.82, 0.80],
+        "소형주 PBR": [0.65, 0.63, 0.66, 0.69, 0.67, 0.65, 0.62, 0.63, 0.66, 0.67, 0.68, 0.66]
+    }
+    df = pd.DataFrame(data, index=dates)
+    df.index.name = "Date"
+    return df
 
 # ==========================================
 # UI 렌더링 (선택된 페이지에 따라 다르게 그림)

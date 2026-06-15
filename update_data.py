@@ -84,7 +84,7 @@ def update_csv():
     ko4 = get_current_kospi4()
     vk = get_current_vkospi() # (우회 도구 적용된 함수)
     
-    print(f"📊 수집 상태 -> 네이버: {kr is not None}, 야후: {ko4 is not None}, V-KOSPI: {vk is not None}")
+    print(f"[STATUS] 수집 상태 -> 네이버: {kr is not None}, 야후: {ko4 is not None}, V-KOSPI: {vk is not None}")
 
     # 4. 데이터 덮어쓰기 (핵심: today_dt가 아니라 market_dt 위치에 넣습니다)
     if kr:
@@ -98,7 +98,95 @@ def update_csv():
     # 5. 빈칸 채우고 저장하기
     df = df.sort_index(ascending=True).ffill().dropna(how='all')
     df.to_csv('KPRICE.csv', encoding='utf-8')
-    print(f"✅ 업데이트 완료 (기준일: {market_date_str})")
+    print(f"[SUCCESS] 업데이트 완료 (기준일: {market_date_str})")
+    
+    # 6. 한국 주식 밸류에이션 데이터(PER, PBR) 수집 자동화 연동
+    try:
+        update_valuation_csv(market_dt)
+    except Exception as e:
+        print(f"[WARNING] 밸류에이션 수집 에러: {e}")
+
+def update_valuation_csv(market_dt):
+    from pykrx import stock
+    import os
+    from datetime import time as dt_time
+    
+    csv_file = 'KVALUATION.csv'
+    
+    # 💡 윈도우 환경/장전 테스트를 위한 안전장치: 장 마감 정산 전(16:30 이전)에 당일 조회를 요청할 경우 
+    # 데이터가 없어서 거래소 API가 에러를 내므로 수집 기준일을 어제 날짜로 당깁니다.
+    now = datetime.now()
+    adjusted_dt = market_dt
+    if market_dt.date() >= now.date() and now.time() < dt_time(16, 30):
+        adjusted_dt = market_dt - timedelta(days=1)
+        print(f"[FILE] 장 마감 정산 전이므로 수집 범위를 어제({adjusted_dt.strftime('%Y-%m-%d')}) 기준으로 조정합니다.")
+        
+    start_date = (adjusted_dt - timedelta(days=365)).strftime("%Y%m%d")
+    end_date = adjusted_dt.strftime("%Y%m%d")
+    
+    # 지수 코드 정의 (KOSPI: 1001, 대형주: 1002, 중형주: 1003, 소형주: 1004)
+    indices = {
+        '1001': 'KOSPI 전체',
+        '1002': '대형주',
+        '1003': '중형주',
+        '1004': '소형주'
+    }
+    
+    if not os.path.exists(csv_file):
+        print("[FILE] KVALUATION.csv 파일이 없습니다. 최초 1년치 데이터를 수집하여 초기 생성합니다...")
+        
+        merged_df = None
+        for code, name in indices.items():
+            try:
+                print(f"[API] pykrx 수집 중: {name} ({code}) [{start_date} ~ {end_date}]")
+                df = stock.get_index_fundamental(start_date, end_date, code)
+                if df.empty:
+                    continue
+                
+                # 필요한 컬럼만 추출
+                sub_df = df[['PER', 'PBR']].copy()
+                sub_df.columns = [f"{name} PER", f"{name} PBR"]
+                
+                if merged_df is None:
+                    merged_df = sub_df
+                else:
+                    merged_df = merged_df.join(sub_df, how='outer')
+            except Exception as e:
+                print(f"[ERROR] {name} 데이터 수집 실패: {e}")
+                
+        if merged_df is not None:
+            merged_df.index.name = 'Date'
+            merged_df = merged_df.sort_index().ffill()
+            merged_df.to_csv(csv_file, encoding='utf-8')
+            print(f"[SUCCESS] KVALUATION.csv 초기 생성 완료 (행 개수: {len(merged_df)})")
+        else:
+            print("[ERROR] 초기 데이터 수집에 실패하여 CSV를 생성하지 못했습니다.")
+            
+    else:
+        print("[FILE] 기존 KVALUATION.csv를 업데이트합니다...")
+        try:
+            val_df = pd.read_csv(csv_file, encoding='utf-8')
+        except Exception:
+            val_df = pd.read_csv(csv_file, encoding='cp949')
+            
+        val_df['Date'] = pd.to_datetime(val_df['Date'])
+        val_df = val_df.set_index('Date')
+        
+        # 당일 데이터 크롤링 (단일 일자 adjusted_dt 기준 조회)
+        query_date_str = adjusted_dt.strftime("%Y%m%d")
+        for code, name in indices.items():
+            try:
+                df = stock.get_index_fundamental(query_date_str, query_date_str, code)
+                if not df.empty:
+                    val_df.loc[adjusted_dt, f"{name} PER"] = float(df.iloc[0]['PER'])
+                    val_df.loc[adjusted_dt, f"{name} PBR"] = float(df.iloc[0]['PBR'])
+                    print(f"[STATUS] {name} 당일 수집 완료 -> PER: {df.iloc[0]['PER']}, PBR: {df.iloc[0]['PBR']}")
+            except Exception as e:
+                print(f"[ERROR] {name} 당일 수집 실패: {e}")
+                
+        val_df = val_df.sort_index().ffill()
+        val_df.to_csv(csv_file, encoding='utf-8')
+        print(f"[SUCCESS] KVALUATION.csv 업데이트 완료 (기준일: {adjusted_dt.strftime('%Y-%m-%d')})")
 
 if __name__ == "__main__":
     update_csv()
