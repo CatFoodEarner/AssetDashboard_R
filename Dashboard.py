@@ -256,6 +256,12 @@ def load_korean_market_data():
         df['Date'] = pd.to_datetime(df['Date'])
         df = df.set_index('Date')
         
+        # [개선] 쉼표(,)를 제거하고 모든 컬럼을 float형태로 우선 통일하여 신규 데이터 추가시의 dtype 충돌을 사전에 방지합니다.
+        for col in df.columns:
+            if df[col].dtype == 'object' or df[col].dtype.name in ('string', 'str'):
+                df[col] = df[col].astype(str).str.replace(',', '', regex=False)
+        df = df.astype(float)
+        
         # 2. 3개의 사이트에서 오늘(현재) 지수 5개 크롤링
         current_korean = get_current_korean_indices() # 네이버 (KOSPI, KOSDAQ, KOSPI200)
         current_kospi4 = get_current_kospi4()         # 야후 (KOSPI4)
@@ -276,11 +282,6 @@ def load_korean_market_data():
                 df.loc[today_date, 'V-KOSPI'] = current_vkospi
             
         df = df.sort_index(ascending=True)
-        
-        # [신규] 숫자로 변환하기 전에, 모든 데이터에 섞여 있는 쉼표(,)를 강제로 지워버립니다.
-        df = df.replace(',', '', regex=True) 
-        
-        df = df.astype(float)
         return df.ffill().dropna(how='all')
         
     except Exception as e:
