@@ -19,7 +19,7 @@ jobs:
 
       - name: Install dependencies
            # 끝에 cloudscraper 를 추가합니다.
-        run: pip install pandas requests beautifulsoup4 cloudscraper
+        run: pip install pandas requests beautifulsoup4 cloudscraper pykrx
 
       - name: Run Python Script
         run: python update_data.py
