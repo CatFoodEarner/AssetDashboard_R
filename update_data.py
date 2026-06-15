@@ -29,12 +29,35 @@ def get_current_kospi4():
 
 def get_current_vkospi():
     try:
-        url = "https://kr.investing.com/indices/kospi-volatility"
-        headers = {'User-Agent': 'Mozilla/5.0', 'Accept-Language': 'ko-KR,ko;q=0.9'}
+        # 선생님이 찾아오신 증권플러스 V-KOSPI 모바일 URL
+        url = "https://www.stockplus.com/m/stocks/KOREA-O2901P"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
         res = requests.get(url, headers=headers, timeout=5)
         soup = BeautifulSoup(res.text, 'html.parser')
-        return float(soup.select_one('[data-test="instrument-price-last"]').text.replace(',', ''))
-    except: return None
+        
+        import re
+        
+        # 1순위 탐색: <title> 태그 파싱 (디자인이 바뀌어도 절대 고장 나지 않는 가장 강력한 방법)
+        # 보통 증권 사이트는 탭 제목에 "VKOSPI 61.65 - 증권플러스" 처럼 현재가를 적어둡니다.
+        if soup.title:
+            matches = re.findall(r'(\d{1,3}\.\d{2})', soup.title.text)
+            if matches:
+                return float(matches[0])
+        
+        # 2순위 탐색: HTML 본문에서 V-KOSPI 가격 형태 텍스트 찾기
+        for tag in soup.find_all(['strong', 'span', 'em', 'div']):
+            text = tag.get_text(strip=True).replace(',', '')
+            # V-KOSPI는 소수점 둘째 자리까지 나오는 숫자 형태(예: 61.65)입니다.
+            if re.match(r'^\d{1,3}\.\d{2}$', text):
+                val = float(text)
+                if 5.0 <= val <= 200.0:  # 변동성 지수의 현실적인 범위(5~200) 필터링
+                    return val
+                    
+        return None
+    except Exception as e:
+        return None
 
 # --- 방어막이 추가된 메인 업데이트 로직 ---
 def update_csv():
