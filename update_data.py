@@ -27,36 +27,35 @@ def get_current_kospi4():
         return float(soup.select_one('span[data-testid="qsp-price"]').text.replace(',', ''))
     except: return None
 
+# --- V-KOSPI 크롤링 (Investing.com Cloudflare 우회 버전) ---
 def get_current_vkospi():
     try:
-        # 선생님이 찾아오신 증권플러스 V-KOSPI 모바일 URL
-        url = "https://www.stockplus.com/m/stocks/KOREA-O2901P"
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
-        res = requests.get(url, headers=headers, timeout=5)
+        import cloudscraper
+        
+        url = "https://kr.investing.com/indices/kospi-volatility"
+        
+        # 💡 핵심: 일반 파이썬 requests 대신, 진짜 윈도우 크롬 브라우저의 지문(Fingerprint)을 복제하는 스크래퍼 생성
+        scraper = cloudscraper.create_scraper(
+            browser={
+                'browser': 'chrome',
+                'platform': 'windows',
+                'desktop': True
+            }
+        )
+        
+        # requests.get 대신 scraper.get 사용
+        res = scraper.get(url, timeout=10)
         soup = BeautifulSoup(res.text, 'html.parser')
         
-        import re
+        # Investing.com의 고유 속성 타겟팅
+        price_element = soup.select_one('[data-test="instrument-price-last"]')
         
-        # 1순위 탐색: <title> 태그 파싱 (디자인이 바뀌어도 절대 고장 나지 않는 가장 강력한 방법)
-        # 보통 증권 사이트는 탭 제목에 "VKOSPI 61.65 - 증권플러스" 처럼 현재가를 적어둡니다.
-        if soup.title:
-            matches = re.findall(r'(\d{1,3}\.\d{2})', soup.title.text)
-            if matches:
-                return float(matches[0])
-        
-        # 2순위 탐색: HTML 본문에서 V-KOSPI 가격 형태 텍스트 찾기
-        for tag in soup.find_all(['strong', 'span', 'em', 'div']):
-            text = tag.get_text(strip=True).replace(',', '')
-            # V-KOSPI는 소수점 둘째 자리까지 나오는 숫자 형태(예: 61.65)입니다.
-            if re.match(r'^\d{1,3}\.\d{2}$', text):
-                val = float(text)
-                if 5.0 <= val <= 200.0:  # 변동성 지수의 현실적인 범위(5~200) 필터링
-                    return val
-                    
+        if price_element:
+            return float(price_element.text.replace(',', ''))
         return None
+        
     except Exception as e:
+        print(f"V-KOSPI 우회 에러: {e}")
         return None
 
 # --- 방어막이 추가된 메인 업데이트 로직 ---
