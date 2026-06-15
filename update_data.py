@@ -111,6 +111,16 @@ def update_valuation_csv(market_dt):
     import os
     from datetime import time as dt_time
     
+    # 💡 KRX 로그인 환경변수 체크 및 가이드 출력
+    krx_id = os.getenv("KRX_ID")
+    krx_pw = os.getenv("KRX_PW")
+    if not krx_id or not krx_pw:
+        print("[WARNING] KRX_ID 또는 KRX_PW 환경 변수가 설정되지 않았습니다.")
+        print("          KRX 정보데이터시스템(https://data.krx.co.kr)이 회원제로 개편됨에 따라,")
+        print("          pykrx를 통한 밸류에이션(PER/PBR) 데이터 수집을 위해서는 로그인 자격 증명이 필수적입니다.")
+        print("          1. KRX 정보데이터시스템(https://data.krx.co.kr) 회원가입 (무료)")
+        print("          2. 로컬 실행 시 환경 변수 설정 또는 GitHub Repository Secrets에 KRX_ID, KRX_PW 등록")
+        
     csv_file = 'KVALUATION.csv'
     
     # 💡 윈도우 환경/장전 테스트를 위한 안전장치: 장 마감 정산 전(16:30 이전)에 당일 조회를 요청할 경우 
