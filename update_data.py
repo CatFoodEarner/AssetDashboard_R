@@ -49,8 +49,8 @@ def update_csv():
     res = requests.get(url, headers=headers, timeout=5)
     soup = BeautifulSoup(res.text, 'html.parser')
     
-    # 네이버 화면의 "2026.04.01 장마감" 에서 10글자(날짜)만 빼와서 YYYY-MM-DD 형태로 변환
-    market_date_str = soup.select_one('#time1').text[:10].replace('.', '-')
+    # [수정] .strip()을 추가하여 글자 앞뒤에 숨어있는 투명한 줄바꿈과 공백을 싹 지운 후 10글자를 자릅니다.
+    market_date_str = soup.select_one('#time1').text.strip()[:10].replace('.', '-')
 
     # 3. [휴장일 방어막] 오늘 날짜와 장 열린 날짜가 다르면 그대로 봇을 퇴근시킴!
     if today_str != market_date_str:
