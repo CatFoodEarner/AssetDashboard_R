@@ -49,15 +49,14 @@ def update_csv():
     res = requests.get(url, headers=headers, timeout=5)
     soup = BeautifulSoup(res.text, 'html.parser')
     
-    # [수정] .strip()을 추가하여 글자 앞뒤에 숨어있는 투명한 줄바꿈과 공백을 싹 지운 후 10글자를 자릅니다.
     market_date_str = soup.select_one('#time1').text.strip()[:10].replace('.', '-')
 
-    # 3. [휴장일 방어막] 오늘 날짜와 장 열린 날짜가 다르면 그대로 봇을 퇴근시킴!
+    # 3. [휴장일 방어막]
     if today_str != market_date_str:
         print(f"오늘은 휴장일(공휴일/주말)입니다. 업데이트를 건너뜁니다. (시장 열린 날: {market_date_str} / 오늘: {today_str})")
         return 
 
-    # 4. 날짜가 같으면(정상 영업일) 아래 저장 로직을 실행
+    # 4. CSV 불러오기
     try: df = pd.read_csv('KPRICE.csv', encoding='utf-8')
     except: df = pd.read_csv('KPRICE.csv', encoding='cp949')
 
@@ -65,21 +64,30 @@ def update_csv():
     df['Date'] = pd.to_datetime(df['Date'])
     df = df.set_index('Date')
 
+    # 5. 크롤링 시도
     kr = get_current_korean_indices()
     ko4 = get_current_kospi4()
     vk = get_current_vkospi()
+    
+    # 💡 봇이 어디서 막혔는지 깃허브 로그에서 볼 수 있도록 기록을 남깁니다.
+    print(f"📊 수집 상태 확인 -> 네이버: {kr is not None}, 야후(소형주): {ko4 is not None}, 인베스팅(V-KOSPI): {vk is not None}")
 
-    if kr and ko4 and vk:
+    # 6. [핵심] 가장 믿음직한 네이버(kr)만 성공해도 무조건 오늘 행을 만듭니다.
+    if kr:
         today_dt = pd.to_datetime(today_kst)
         df.loc[today_dt, 'KOSPI'] = kr['KOSPI']
         df.loc[today_dt, 'KOSPI200'] = kr['KOSPI200']
         df.loc[today_dt, 'KOSDAQ'] = kr['KOSDAQ']
-        df.loc[today_dt, 'KOSPI4'] = ko4
-        df.loc[today_dt, 'V-KOSPI'] = vk
+        
+        # 야후와 인베스팅은 성공했을 때만 넣습니다. 
+        # (실패해서 빈칸이 되면 아래 ffill()이 자동으로 어제 가격으로 메워줍니다.)
+        if ko4: df.loc[today_dt, 'KOSPI4'] = ko4
+        if vk: df.loc[today_dt, 'V-KOSPI'] = vk
 
+    # 7. 빈칸 채우고 저장하기
     df = df.sort_index(ascending=True).ffill().dropna(how='all')
     df.to_csv('KPRICE.csv', encoding='utf-8')
-    print(f"정상 영업일 업데이트 완료: {today_str}")
+    print(f"✅ 정상 영업일 업데이트 완료: {today_str}")
 
 if __name__ == "__main__":
     update_csv()
