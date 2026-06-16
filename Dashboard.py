@@ -855,7 +855,7 @@ elif page == "💵 단기 크레딧 (Short-term Credit)":
         # 세부 결과 표 출력
         st.dataframe(
             res_df.style.format({
-                "예상 세후 수익 (KRW)": "{:+, .0f} 원",
+                "예상 세후 수익 (KRW)": "{:+,.0f} 원",
                 "만기 평가 금액 (KRW)": "{:,.0f} 원"
             }),
             use_container_width=True
