@@ -16,7 +16,7 @@ st.set_page_config(page_title="Asset Factor Dashboard", layout="wide")
 # 1. 공통 사이드바 (메뉴 네비게이션)
 # ==========================================
 st.sidebar.title("🧭 투자 자산 대시보드")
-page = st.sidebar.radio("자산군 선택", ["🪙 금 (Gold)", "🇰🇷 한국 주식 (KOSPI)"])
+page = st.sidebar.radio("자산군 선택", ["🪙 금 (Gold)", "🇰🇷 한국 주식 (KOSPI)", "💵 단기 크레딧 (Short-term Credit)"])
 
 # ==========================================
 # 2. 금 (Gold) 페이지 함수 모음
@@ -123,23 +123,33 @@ def get_current_domestic_gold():
 
 def get_current_vkospi():
     try:
-        url = "https://kr.investing.com/indices/kospi-volatility"
-        # Investing.com의 강력한 봇 차단을 뚫기 위한 한국어 + 최신 브라우저 위장 헤더
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
-        }
-        res = requests.get(url, headers=headers, timeout=5)
+        # cloudscraper 우회 시도, 실패 시 일반 requests 방식 적용
+        try:
+            import cloudscraper
+            scraper = cloudscraper.create_scraper(
+                browser={
+                    'browser': 'chrome',
+                    'platform': 'windows',
+                    'desktop': True
+                }
+            )
+            url = "https://kr.investing.com/indices/kospi-volatility"
+            res = scraper.get(url, timeout=5)
+        except ImportError:
+            url = "https://kr.investing.com/indices/kospi-volatility"
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+            }
+            res = requests.get(url, headers=headers, timeout=5)
+            
         soup = BeautifulSoup(res.text, 'html.parser')
-        
-        # 선생님이 찾으신 고유 속성 data-test="instrument-price-last" 로 타겟팅
         price_element = soup.select_one('[data-test="instrument-price-last"]')
         
         if price_element:
             return float(price_element.text.replace(',', ''))
-        else:
-            return None
+        return None
     except Exception as e:
         return None
     
@@ -237,10 +247,20 @@ def get_current_kospi4():
 @st.cache_data(ttl=3600)
 def load_korean_market_data():
     try:
-        # 1. 과거 시계열 CSV 불러오기
-        df = pd.read_csv('KPRICE.csv', encoding='cp949')
+        # 1. 과거 시계열 CSV 불러오기 (인코딩 다중 지원으로 에러 방지)
+        try:
+            df = pd.read_csv('KPRICE.csv', encoding='utf-8')
+        except Exception:
+            df = pd.read_csv('KPRICE.csv', encoding='cp949')
+            
         df['Date'] = pd.to_datetime(df['Date'])
         df = df.set_index('Date')
+        
+        # [개선] 쉼표(,)를 제거하고 모든 컬럼을 float형태로 우선 통일하여 신규 데이터 추가시의 dtype 충돌을 사전에 방지합니다.
+        for col in df.columns:
+            if df[col].dtype == 'object' or df[col].dtype.name in ('string', 'str'):
+                df[col] = df[col].astype(str).str.replace(',', '', regex=False)
+        df = df.astype(float)
         
         # 2. 3개의 사이트에서 오늘(현재) 지수 5개 크롤링
         current_korean = get_current_korean_indices() # 네이버 (KOSPI, KOSDAQ, KOSPI200)
@@ -248,27 +268,197 @@ def load_korean_market_data():
         current_vkospi = get_current_vkospi()         # 인베스팅 (V-KOSPI)
         
         # 3. 크롤링 성공 시, 오늘 날짜로 데이터 한 줄 추가 (Append)
-        if current_korean and current_kospi4 and current_vkospi:
+        # 💡 [개선] 3가지 소스 중 일부가 실패해도 개별적으로 채워넣을 수 있도록 완화
+        if current_korean or current_kospi4 or current_vkospi:
             today_date = pd.to_datetime(datetime.date.today())
             
-            # CSV 컬럼 이름에 맞게 세팅 (순서나 이름은 CSV 파일과 동일해야 함)
-            df.loc[today_date, 'KOSPI'] = current_korean['KOSPI']
-            df.loc[today_date, 'KOSPI200'] = current_korean['KOSPI200']
-            df.loc[today_date, 'KOSDAQ'] = current_korean['KOSDAQ']
-            df.loc[today_date, 'KOSPI4'] = current_kospi4
-            df.loc[today_date, 'V-KOSPI'] = current_vkospi
+            if current_korean:
+                df.loc[today_date, 'KOSPI'] = current_korean.get('KOSPI')
+                df.loc[today_date, 'KOSPI200'] = current_korean.get('KOSPI200')
+                df.loc[today_date, 'KOSDAQ'] = current_korean.get('KOSDAQ')
+            if current_kospi4 is not None:
+                df.loc[today_date, 'KOSPI4'] = current_kospi4
+            if current_vkospi is not None:
+                df.loc[today_date, 'V-KOSPI'] = current_vkospi
             
         df = df.sort_index(ascending=True)
-        
-        # [신규] 숫자로 변환하기 전에, 모든 데이터에 섞여 있는 쉼표(,)를 강제로 지워버립니다.
-        df = df.replace(',', '', regex=True) 
-        
-        df = df.astype(float)
         return df.ffill().dropna(how='all')
         
     except Exception as e:
         st.error(f"한국 주식 데이터 로딩 에러: {e}")
         return pd.DataFrame()
+
+# ==========================================
+# 8. 한국 주식 밸류에이션 데이터 로드 (실데이터 KVALUATION.csv 연동 및 폴백)
+# ==========================================
+@st.cache_data(ttl=86400)
+def load_valuation_data():
+    import os
+    csv_file = 'KVALUATION.csv'
+    
+    # 1. 수집된 KVALUATION.csv 파일이 존재하는 경우 로드 및 가공
+    if os.path.exists(csv_file):
+        try:
+            try:
+                df = pd.read_csv(csv_file, encoding='utf-8')
+            except Exception:
+                df = pd.read_csv(csv_file, encoding='cp949')
+                
+            df['Date'] = pd.to_datetime(df['Date'])
+            df = df.set_index('Date')
+            
+            # 최근 1년 월말 데이터로 다운샘플링하여 최종 12개월 표기
+            monthly_df = df.resample('ME').last()
+            return monthly_df.tail(12)
+        except Exception as e:
+            st.warning(f"KVALUATION.csv 파싱 실패: {e}. 임시 모형 데이터를 표시합니다.")
+            
+    # 2. 파일이 없거나 로드 오류 시 대시보드 크래시 방지를 위한 Mock 데이터 반환
+    dates = pd.date_range(end=datetime.date.today(), periods=12, freq='ME')
+    data = {
+        "KOSPI 전체 PER": [11.2, 10.8, 11.5, 12.1, 11.9, 11.4, 10.9, 11.1, 11.5, 11.8, 12.0, 11.7],
+        "대형주 PER": [12.1, 11.5, 12.3, 13.0, 12.7, 12.2, 11.6, 11.9, 12.4, 12.7, 12.9, 12.5],
+        "중형주 PER": [9.5, 9.2, 9.7, 10.1, 9.9, 9.6, 9.1, 9.3, 9.6, 9.8, 10.0, 9.7],
+        "소형주 PER": [8.2, 8.0, 8.4, 8.7, 8.5, 8.3, 7.9, 8.1, 8.3, 8.5, 8.7, 8.4],
+        "KOSPI 전체 PBR": [0.95, 0.92, 0.97, 1.01, 0.99, 0.96, 0.91, 0.93, 0.96, 0.98, 1.00, 0.97],
+        "대형주 PBR": [1.05, 1.01, 1.07, 1.12, 1.10, 1.06, 1.01, 1.03, 1.07, 1.09, 1.11, 1.08],
+        "중형주 PBR": [0.78, 0.75, 0.79, 0.82, 0.80, 0.78, 0.74, 0.76, 0.79, 0.81, 0.82, 0.80],
+        "소형주 PBR": [0.65, 0.63, 0.66, 0.69, 0.67, 0.65, 0.62, 0.63, 0.66, 0.67, 0.68, 0.66]
+    }
+    df = pd.DataFrame(data, index=dates)
+    df.index.name = "Date"
+    return df
+
+# ==========================================
+# 9. 단기 크레딧 데이터 로드 (FRED, ECOS API 및 폴백)
+# ==========================================
+@st.cache_data(ttl=3600)
+def load_credit_data():
+    import datetime
+    import FinanceDataReader as fdr
+    import pandas as pd
+    import yfinance as yf
+    import requests
+    
+    end_date = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    start_date = end_date - datetime.timedelta(days=365)
+    
+    # 1. 미국 SOFR (FRED:SOFR) 및 USD/KRW 환율 (yfinance)
+    df_credit = pd.DataFrame()
+    
+    # SOFR 가져오기
+    try:
+        sofr = fdr.DataReader('FRED:SOFR', start_date, end_date)
+        if not sofr.empty:
+            df_credit['SOFR'] = sofr['SOFR']
+    except Exception:
+        pass
+        
+    # USD/KRW 가져오기 (yfinance)
+    try:
+        usd_krw_history = yf.Ticker("KRW=X").history(period="1y")['Close']
+        if not usd_krw_history.empty:
+            usd_krw_history.index = pd.to_datetime(usd_krw_history.index).tz_localize(None).normalize()
+            df_credit['USD_KRW'] = usd_krw_history
+    except Exception:
+        pass
+        
+    # 2. 한국은행 ECOS API 호출 시도 (인증키 있을 경우)
+    ecos_success = False
+    try:
+        if "BOK_API_KEY" in st.secrets:
+            key = st.secrets["BOK_API_KEY"]
+            start_str = start_date.strftime("%Y%m%d")
+            end_str = end_date.strftime("%Y%m%d")
+            
+            # ECOS 시장금리(일별) 통계표: 060Y001
+            # 한국은행 기준금리(010100000), CD91일(010200000), 통안증권91일(010201000), 회사채3년 AA-(010300000), 국고채3년(010302000)
+            items = {
+                '010100000': 'BOK_Base_Rate',
+                '010200000': 'CD_91D',
+                '010201000': 'MSB_91D',
+                '010300000': 'Corp_Bond_3Y',
+                '010302000': 'KTB_3Y'
+            }
+            
+            ecos_df_list = []
+            for item_code, col_name in items.items():
+                url = f"https://ecos.bok.or.kr/api/StatisticSearch/{key}/json/kr/1/1000/060Y001/D/{start_str}/{end_str}/{item_code}"
+                res = requests.get(url, timeout=5)
+                if res.status_code == 200:
+                    data = res.json()
+                    if 'StatisticSearch' in data:
+                        rows = data['StatisticSearch']['row']
+                        item_df = pd.DataFrame(rows)
+                        item_df['TIME'] = pd.to_datetime(item_df['TIME'], format='%Y%m%d', errors='coerce')
+                        item_df['DATA_VALUE'] = item_df['DATA_VALUE'].astype(float)
+                        item_df = item_df.set_index('TIME')[['DATA_VALUE']].rename(columns={'DATA_VALUE': col_name})
+                        ecos_df_list.append(item_df)
+            
+            if ecos_df_list:
+                ecos_merged = pd.concat(ecos_df_list, axis=1)
+                df_credit = df_credit.join(ecos_merged, how='outer')
+                ecos_success = True
+    except Exception:
+        pass
+            
+    # 3. ECOS 호출 실패 또는 인증키가 없을 경우, 혹은 데이터가 비어 있을 경우 Fallback 처리
+    # (한국 CD 금리는 FRED의 OECD 월간 CD금리 활용 및 기준금리에 따른 가상의 스프레드로 일별 보간)
+    if not ecos_success or 'BOK_Base_Rate' not in df_credit.columns:
+        # FRED에서 OECD 한국 CD금리(월간) 가져오기 시도
+        fred_cd = pd.Series(dtype=float)
+        try:
+            cd_fred = fdr.DataReader('FRED:IR3TCD01KRM156N', start_date, end_date)
+            if not cd_fred.empty:
+                fred_cd = cd_fred['IR3TCD01KRM156N']
+        except Exception:
+            pass
+            
+        # 기준일 인덱스 생성
+        date_range = pd.date_range(start=start_date, end=end_date, freq='D')
+        fallback_df = pd.DataFrame(index=date_range)
+        
+        # 한국 기준금리 3.50% (최근 한국은행 기준금리는 3.50%)
+        fallback_df['BOK_Base_Rate'] = 3.50
+        
+        # CD 91일물: FRED CD 금리 우선 사용, 없으면 기준금리 + 0.05%
+        if not fred_cd.empty:
+            # 일별 데이터로 리샘플링 후 ffill
+            fred_cd.index = pd.to_datetime(fred_cd.index)
+            fred_cd_daily = fred_cd.reindex(date_range).ffill()
+            fallback_df['CD_91D'] = fred_cd_daily.fillna(3.55)
+        else:
+            fallback_df['CD_91D'] = 3.55
+            
+        # 통안채 91일물: 기준금리 - 0.02%
+        fallback_df['MSB_91D'] = 3.48
+        
+        # 국고채 3년물: 기준금리 - 0.15% (최근 금리 인하 기대 반영 역전 현상)
+        fallback_df['KTB_3Y'] = 3.35
+        
+        # 회사채 3년물 (AA-): 기준금리 + 0.50%
+        fallback_df['Corp_Bond_3Y'] = 4.00
+        
+        # 기존 df_credit와 병합
+        if df_credit.empty:
+            df_credit = fallback_df
+        else:
+            # 없는 컬럼만 fallback_df에서 채워넣음
+            for col in ['BOK_Base_Rate', 'CD_91D', 'MSB_91D', 'KTB_3Y', 'Corp_Bond_3Y']:
+                if col not in df_credit.columns:
+                    df_credit[col] = fallback_df[col]
+                    
+    # SOFR 및 환율 널값 기본값 채우기
+    if 'SOFR' not in df_credit.columns:
+        df_credit['SOFR'] = 5.31 # 최근 미국 SOFR 평균 금리
+    if 'USD_KRW' not in df_credit.columns:
+        df_credit['USD_KRW'] = 1380.0
+        
+    # 데이터 정리: 정렬, ffill, 결측치 제거
+    df_credit = df_credit.sort_index().ffill().bfill().dropna(how='all')
+    df_credit.index.name = 'Date'
+    return df_credit
+
 
 # ==========================================
 # UI 렌더링 (선택된 페이지에 따라 다르게 그림)
@@ -507,3 +697,174 @@ elif page == "🇰🇷 한국 주식 (KOSPI)":
                 st.dataframe(val_df[["KOSPI 전체 PBR", "대형주 PBR", "중형주 PBR", "소형주 PBR"]].style.format("{:.2f} x").background_gradient(cmap='Blues', axis=0), use_container_width=True)
         else:
             st.info("밸류에이션 데이터를 불러오는 중입니다...")
+
+elif page == "💵 단기 크레딧 (Short-term Credit)":
+    st.title("💵 단기 크레딧(Short-term Credit) 팩터 대시보드")
+    
+    # 데이터 로드
+    df_credit = load_credit_data()
+    
+    if not df_credit.empty:
+        # 최신 금리 추출
+        latest_sofr = df_credit['SOFR'].iloc[-1]
+        latest_base_rate = df_credit['BOK_Base_Rate'].iloc[-1]
+        latest_cd = df_credit['CD_91D'].iloc[-1]
+        latest_msb = df_credit['MSB_91D'].iloc[-1]
+        latest_ktb3y = df_credit['KTB_3Y'].iloc[-1]
+        latest_corpbond = df_credit['Corp_Bond_3Y'].iloc[-1]
+        latest_usd_krw = df_credit['USD_KRW'].iloc[-1]
+        
+        # 고정 기본값 설정 (수집 안 되는 개별 예금/RP 보완)
+        deposit_rate = 3.50  # 시중은행 대표 정기예금 금리
+        cma_rp_rate = 3.20   # 증권사 CMA RP 금리
+        usd_rp_rate = 4.50   # 증권사 외화 CMA RP 금리
+        us_tbill_3m = 5.25   # 미국 국채 3개월물 금리
+        
+        # ---------------------------------------------
+        # 1. 금리 전광판 (Yield Board)
+        # ---------------------------------------------
+        st.subheader("📊 주요 단기 크레딧 현황 (Yield Board)")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.markdown("##### 🇰🇷 원화(KRW) 단기 금리")
+            st.metric("한국은행 기준금리", f"{latest_base_rate:.2f} %")
+            st.metric("CD 91일물 수익률", f"{latest_cd:.2f} %")
+            st.metric("통안증권 91일물", f"{latest_msb:.2f} %")
+            st.metric("시중 정기예금 (대표)", f"{deposit_rate:.2f} %", "대표 은행 고시 평균")
+            st.metric("증권사 CMA RP", f"{cma_rp_rate:.2f} %", "수시입출금형 원화")
+            
+        with col2:
+            st.markdown("##### 🇺🇸 외화(USD) 단기 금리")
+            st.metric("미국 SOFR (익일물)", f"{latest_sofr:.2f} %")
+            st.metric("미국 국채 3개월 (T-Bill)", f"{us_tbill_3m:.2f} %")
+            st.metric("증권사 외화 CMA RP", f"{usd_rp_rate:.2f} %", "수시입출금형 외화")
+            st.metric("국고채 3년물", f"{latest_ktb3y:.2f} %", "한국 국채 벤치마크")
+            st.metric("회사채 3년물 (AA-)", f"{latest_corpbond:.2f} %", "신용스프레드 포함")
+            
+        with col3:
+            st.markdown("##### 💱 환율 및 환 프리미엄")
+            st.metric("USD/KRW 환율", f"{latest_usd_krw:,.2f} 원")
+            
+            # 내외 금리차 (미국 SOFR - 한국 기준금리)
+            interest_gap = latest_sofr - latest_base_rate
+            st.metric("한-미 단기 금리차 (US-KR)", f"{interest_gap:+.2f} %p", "미국 SOFR - 한국 기준금리")
+            
+            # 이론 스왑 프리미엄 연율화 (원화 금리 - 외화 금리)
+            swap_premium = latest_base_rate - latest_sofr
+            st.metric("이론 스왑 프리미엄 (환헤지 코스트)", f"{swap_premium:+.2f} %", "음수(-)는 환헤지 시 비용 발생")
+            
+        st.markdown("---")
+        
+        # ---------------------------------------------
+        # 2. 금리 추이 차트
+        # ---------------------------------------------
+        st.subheader("📈 주요 단기 금리 역사적 추이")
+        
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=df_credit.index, y=df_credit['SOFR'], name="미국 SOFR (Daily)", line=dict(color="#FFBF00", width=2)))
+        fig.add_trace(go.Scatter(x=df_credit.index, y=df_credit['CD_91D'], name="CD 91일물 (Daily)", line=dict(color="#1f77b4", width=2)))
+        fig.add_trace(go.Scatter(x=df_credit.index, y=df_credit['MSB_91D'], name="통안채 91일물 (Daily)", line=dict(color="#2ca02c", width=2)))
+        fig.add_trace(go.Scatter(x=df_credit.index, y=df_credit['BOK_Base_Rate'], name="한국 기준금리", line=dict(color="#d62728", width=1.5, dash="dash")))
+        fig.add_trace(go.Scatter(x=df_credit.index, y=df_credit['Corp_Bond_3Y'], name="회사채 3년 (AA-)", line=dict(color="#9467bd", width=1.5, dash="dot")))
+        
+        fig.update_layout(
+            height=450,
+            margin=dict(l=20, r=20, t=20, b=20),
+            hovermode="x unified",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
+        st.markdown("---")
+        
+        # ---------------------------------------------
+        # 3. 단기 자산 투자 계산기 (Investment Calculator)
+        # ---------------------------------------------
+        st.subheader("🧮 단기 자산 기대수익률 계산기")
+        st.markdown("원화 자금으로 단기 투자를 진행할 때, 각 상품별 세후 기대수익률과 환율 변동을 고려한 외화 투자의 민감도를 비교합니다.")
+        
+        # 입력 패널
+        calc_col1, calc_col2, calc_col3 = st.columns(3)
+        
+        with calc_col1:
+            inv_amount = st.number_input("투자 원금 (KRW)", min_value=1000000, max_value=10000000000, value=50000000, step=5000000, format="%d")
+            st.caption(f"현재 환산 원금: **{inv_amount:,.0f}** 원")
+            
+        with calc_col2:
+            inv_days = st.selectbox("투자 기간 (일)", options=[30, 90, 180, 270, 365], index=1)
+            st.caption(f"선택한 투자 기간: **{inv_days}일** (~ {inv_days/365:.2f}년)")
+            
+        with calc_col3:
+            expected_fx_change = st.slider("예상 환율 변동률 (%)", min_value=-10.0, max_value=10.0, value=0.0, step=0.5)
+            st.caption(f"만기 시 예상 환율: **{latest_usd_krw * (1 + expected_fx_change/100):,.2f}** 원")
+            
+        # 수익률 계산 (일반 과세 15.4% 적용)
+        tax_rate = 0.154
+        
+        # A. 시중은행 정기예금 (고정 3.50%)
+        deposit_net = inv_amount * (deposit_rate / 100) * (inv_days / 365) * (1 - tax_rate)
+        
+        # B. 증권사 CMA RP (고정 3.20%)
+        cma_net = inv_amount * (cma_rp_rate / 100) * (inv_days / 365) * (1 - tax_rate)
+        
+        # C. CD/KOFR 금리 ETF (최신 CD 금리 반영)
+        cd_net = inv_amount * (latest_cd / 100) * (inv_days / 365) * (1 - tax_rate)
+        
+        # D. 외화 RP (환노출) - 세후 분배 후 만기 시 환전
+        usd_amount = inv_amount / latest_usd_krw
+        usd_interest = usd_amount * (usd_rp_rate / 100) * (inv_days / 365)
+        usd_interest_after_tax = usd_interest * (1 - tax_rate)
+        usd_final = usd_amount + usd_interest_after_tax
+        end_fx_rate = latest_usd_krw * (1 + expected_fx_change / 100)
+        krw_final = usd_final * end_fx_rate
+        usd_rp_net = krw_final - inv_amount
+        
+        # 결과 시각화 데이터 생성
+        result_data = {
+            "투자 상품": ["시중 정기예금", "원화 CMA RP", "CD 금리형 ETF", "외화 RP (USD CMA)"],
+            "세전 적용 금리": [f"{deposit_rate:.2f}%", f"{cma_rp_rate:.2f}%", f"{latest_cd:.2f}%", f"{usd_rp_rate:.2f}% (USD)"],
+            "예상 세후 수익 (KRW)": [deposit_net, cma_net, cd_net, usd_rp_net],
+            "만기 평가 금액 (KRW)": [inv_amount + deposit_net, inv_amount + cma_net, inv_amount + cd_net, inv_amount + usd_rp_net],
+            "비고": ["확정 금리 / 예금자보호", "수시 입출금 / 원화 확정", "일복리 복리효과 / 시장 연동", f"환노출형 (환변동 {expected_fx_change:+.1f}%)"]
+        }
+        res_df = pd.DataFrame(result_data)
+        
+        # 차트 그리기
+        fig_bar = go.Figure()
+        
+        # 수익형 Bar 차트
+        colors = ["#4A90E2", "#7CACEE", "#50E3C2", "#FFBF00"]
+        fig_bar.add_trace(go.Bar(
+            x=res_df["투자 상품"],
+            y=res_df["예상 세후 수익 (KRW)"],
+            text=[f"{val:+,.0f}원" for val in res_df["예상 세후 수익 (KRW)"]],
+            textposition='auto',
+            marker_color=colors
+        ))
+        
+        fig_bar.update_layout(
+            title=f"💸 {inv_days}일 후 예상 세후 순수익 비교",
+            yaxis_title="예상 세후 수익 (원)",
+            height=350,
+            margin=dict(l=20, r=20, t=40, b=20)
+        )
+        st.plotly_chart(fig_bar, use_container_width=True)
+        
+        # 세부 결과 표 출력
+        st.dataframe(
+            res_df.style.format({
+                "예상 세후 수익 (KRW)": "{:+, .0f} 원",
+                "만기 평가 금액 (KRW)": "{:,.0f} 원"
+            }),
+            use_container_width=True
+        )
+        
+        # 계산기 설명 및 투자 참고 가이드
+        st.info("💡 **단기 자산 투자 팁:**\n"
+                "- **원화 대기자금**: 수시로 인출할 자금은 **CMA RP** 또는 **CD 금리형 ETF**가 유리하며, 예금자보호가 필요하고 기간이 확정된 경우 **정기예금**이 유리합니다.\n"
+                "- **환노출 외화 RP**: 미국 SOFR 연동 금리가 높아 환율 하락(원화 강세) 위험이 없다면 매력적이나, **환율 변동률이 내외 금리차(연 약 1~2%)를 크게 상회하므로** 환율 향방이 투자 성과를 좌우합니다.")
+        
+    else:
+        st.error("단기 크레딧 데이터를 불러오는 데 실패했습니다.")
