@@ -40,21 +40,44 @@ def load_gold_data():
             if attempt < max_retries - 1: time.sleep(3)
             else: return pd.DataFrame()
 
-# ==========================================
-# 매크로 및 IEF 데이터 로드 (FinanceDataReader로 교체)
-# ==========================================
-@st.cache_data(ttl=3600)
+# =================@st.cache_data(ttl=3600)
 def load_macro_data():
-    try:
-        import FinanceDataReader as fdr
-        end = datetime.datetime.now()
+    import time
+    import FinanceDataReader as fdr
+    import pandas as pd
+    
+    end = datetime.datetime.now()
+    start = end - datetime.timedelta(days=365*10) 
+    
+    dfii10_raw = None
+    m2sl_raw = None
+    cpiaucsl_raw = None
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            if dfii10_raw is None:
+                dfii10_raw = fdr.DataReader('FRED:DFII10', start, end)
+            if m2sl_raw is None:
+                m2sl_raw = fdr.DataReader('FRED:M2SL', start, end)
+            if cpiaucsl_raw is None:
+                cpiaucsl_raw = fdr.DataReader('FRED:CPIAUCSL', start, end)
+                
+            if dfii10_raw is not None and m2sl_raw is not None and cpiaucsl_raw is not None:
+                break
+        except Exception:
+            pass
+        if attempt < max_retries - 1:
+            time.sleep(2)
         
-        # [수정] 데이터를 3년치에서 10년치로 넉넉하게 불러옵니다.
-        start = end - datetime.timedelta(days=365*10) 
-
-        dfii10 = fdr.DataReader('FRED:DFII10', start, end).iloc[:, 0]
-        m2sl = fdr.DataReader('FRED:M2SL', start, end).iloc[:, 0]
-        cpiaucsl = fdr.DataReader('FRED:CPIAUCSL', start, end).iloc[:, 0]
+    if dfii10_raw is None or m2sl_raw is None or cpiaucsl_raw is None:
+        st.warning("⚠️ FRED 매크로 데이터 수집에 일시적으로 실패했습니다. 잠시 후 새로고침해 주세요.")
+        return pd.DataFrame(), pd.Series()
+        
+    try:
+        dfii10 = dfii10_raw.iloc[:, 0]
+        m2sl = m2sl_raw.iloc[:, 0]
+        cpiaucsl = cpiaucsl_raw.iloc[:, 0]
 
         fred_df = pd.DataFrame({
             'DFII10': dfii10,
@@ -64,13 +87,21 @@ def load_macro_data():
         
         fred_df['Real_M2'] = (fred_df['M2SL'] / fred_df['CPIAUCSL']) * 100
 
-        # [수정] IEF (미국 7-10년물 국채 ETF) 기간도 "10y"로 변경
-        ief = yf.Ticker("IEF").history(period="10y")['Close']
-        ief.index = pd.to_datetime(ief.index).tz_localize(None).normalize()
+        # IEF (미국 7-10년물 국채 ETF) 기간도 "10y"로 변경
+        ief = pd.Series(dtype=float)
+        for attempt in range(max_retries):
+            try:
+                ief = yf.Ticker("IEF").history(period="10y")['Close']
+                if not ief.empty:
+                    ief.index = pd.to_datetime(ief.index).tz_localize(None).normalize()
+                    break
+            except Exception:
+                if attempt < max_retries - 1:
+                    time.sleep(2)
 
         return fred_df, ief
     except Exception as e:
-        st.error(f"매크로 데이터 로딩 에러: {e}")
+        st.error(f"매크로 데이터 가공 에러: {e}")
         return pd.DataFrame(), pd.Series()
     
 # 국내 금 현재가 크롤링
