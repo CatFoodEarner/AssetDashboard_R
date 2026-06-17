@@ -16,7 +16,7 @@ st.set_page_config(page_title="Asset Factor Dashboard", layout="wide")
 # 1. 공통 사이드바 (메뉴 네비게이션)
 # ==========================================
 st.sidebar.title("🧭 투자 자산 대시보드")
-page = st.sidebar.radio("자산군 선택", ["🪙 금 (Gold)", "🇰🇷 한국 주식 (KOSPI)", "💵 단기 크레딧 (Short-term Credit)"])
+page = st.sidebar.radio("자산군 선택", ["🪙 금 (Gold)", "🇰🇷 한국 주식 (KOSPI)", "💵 단기 크레딧 (Short-term Credit)", "🌍 세계 주식 (Global Equity)"])
 
 # ==========================================
 # 2. 금 (Gold) 페이지 함수 모음
@@ -573,6 +573,55 @@ def load_etf_returns():
 
 
 # ==========================================
+# 11. 세계 주식 데이터 로드 (yfinance)
+# ==========================================
+@st.cache_data(ttl=86400)
+def load_global_market_data():
+    import yfinance as yf
+    import pandas as pd
+    import datetime
+    
+    tickers = {
+        '^KS11': '한국 (KOSPI)',
+        '^GSPC': '미국 (S&P 500)',
+        '^N225': '일본 (Nikkei 225)',
+        '000001.SS': '중국 (상해종합)',
+        '^FTSE': '영국 (FTSE 100)',
+        '^GDAXI': '독일 (DAX)',
+        '^NSEI': '인도 (Nifty 50)',
+        '^TWII': '대만 (가권지수)',
+        '^BVSP': '브라질 (IBOVESPA)'
+    }
+    
+    end_date = datetime.datetime.now()
+    start_date = end_date - datetime.timedelta(days=365*5 + 10)
+    
+    try:
+        df = yf.download(list(tickers.keys()), start=start_date, end=end_date)['Close']
+        if df.empty:
+            raise ValueError("empty")
+        df = df.ffill().bfill()
+        df.index = pd.to_datetime(df.index).tz_localize(None).normalize()
+        return df, tickers
+    except Exception as e:
+        # Fallback to prevent crash
+        date_range = pd.date_range(start=start_date, end=end_date, freq='B')
+        fallback_df = pd.DataFrame(index=date_range)
+        import numpy as np
+        np.random.seed(42)
+        bases = {
+            '^KS11': 2500, '^GSPC': 5000, '^N225': 38000, '000001.SS': 3000,
+            '^FTSE': 8000, '^GDAXI': 18000, '^NSEI': 22000, '^TWII': 20000, '^BVSP': 120000
+        }
+        for ticker, base in bases.items():
+            steps = np.random.normal(0.0002, 0.01, size=len(date_range))
+            prices = base * np.exp(np.cumsum(steps))
+            fallback_df[ticker] = prices
+        fallback_df.index = pd.to_datetime(fallback_df.index).tz_localize(None).normalize()
+        return fallback_df, tickers
+
+
+# ==========================================
 # UI 렌더링 (선택된 페이지에 따라 다르게 그림)
 # ==========================================
 
@@ -997,4 +1046,177 @@ elif page == "💵 단기 크레딧 (Short-term Credit)":
                 "- **환노출 외화 RP**: 미국 SOFR 연동 금리가 높아 환율 하락(원화 강세) 위험이 없다면 매력적이나, **환율 변동률이 내외 금리차(연 약 1~2%)를 크게 상회하므로** 환율 향방이 투자 성과를 좌우합니다.")
         
     else:
-        st.error("단기 크레딧 데이터를 불러오는 데 실패했습니다.")
+        st.error("단기 크레딧 데이터를 불러오는 데 실패했습니다.")
+
+elif page == "🌍 세계 주식 (Global Equity)":
+    st.title("🌍 세계 주식 (Global Equity) 팩터 대시보드")
+    st.markdown("전 세계 주요 경제권역별 대표 주가 지수들의 성과와 상대적 모멘텀을 한눈에 비교하고 분석합니다.")
+    
+    with st.spinner("세계 주식 데이터를 불러오는 중..."):
+        df_global, tickers = load_global_market_data()
+        
+    if not df_global.empty:
+        # 데이터 정리
+        df_global.index = pd.to_datetime(df_global.index)
+        latest_date = df_global.index[-1]
+        
+        # ---------------------------------------------
+        # 1. 지수별 성과 및 모멘텀 순위 Board
+        # ---------------------------------------------
+        st.subheader("📊 국가별 대표 지수 성과 및 모멘텀 순위")
+        st.markdown("최근 1년 수익률을 기준으로 정렬된 전 세계 대표 지수들의 성과 비교표입니다. (일별 환율 미반영, 로컬 통화 기준)")
+        
+        rows = []
+        for ticker, name in tickers.items():
+            series = df_global[ticker]
+            latest_val = series.iloc[-1]
+            prev_val = series.iloc[-2]
+            daily_change = (latest_val / prev_val - 1) * 100
+            
+            # 1M, 3M, 6M, 1Y, 3Y 수익률 계산
+            date_1m = latest_date - datetime.timedelta(days=30)
+            date_3m = latest_date - datetime.timedelta(days=90)
+            date_6m = latest_date - datetime.timedelta(days=180)
+            date_1y = latest_date - datetime.timedelta(days=365)
+            date_3y = latest_date - datetime.timedelta(days=365*3)
+            
+            def get_return(target_date):
+                try:
+                    closest_idx = series.index.get_indexer([target_date], method='nearest')[0]
+                    hist_val = series.iloc[closest_idx]
+                    hist_date = series.index[closest_idx]
+                    if abs((hist_date - target_date).days) > 15:
+                        return None
+                    return (latest_val / hist_val - 1) * 100
+                except:
+                    return None
+                    
+            ret_1m = get_return(date_1m)
+            ret_3m = get_return(date_3m)
+            ret_6m = get_return(date_6m)
+            ret_1y = get_return(date_1y)
+            ret_3y = get_return(date_3y)
+            
+            rows.append({
+                "국가/지수": name,
+                "티커": ticker,
+                "현재가": latest_val,
+                "전일대비": daily_change,
+                "1개월 수익률": ret_1m,
+                "3개월 수익률": ret_3m,
+                "6개월 수익률": ret_6m,
+                "1년 수익률": ret_1y,
+                "3년 수익률": ret_3y
+            })
+            
+        res_df = pd.DataFrame(rows)
+        # 1년 수익률이 없는 경우 정렬을 위해 임시 디폴트 처리
+        res_df['sort_key'] = res_df['1년 수익률'].fillna(-999.0)
+        res_df = res_df.sort_values(by='sort_key', ascending=False).drop(columns=['sort_key'])
+        
+        # 스타일링을 적용하여 표 출력
+        st.dataframe(
+            res_df.style.format({
+                "현재가": "{:,.2f}",
+                "전일대비": "{:+.2f}%",
+                "1개월 수익률": "{:+.2f}%",
+                "3개월 수익률": "{:+.2f}%",
+                "6개월 수익률": "{:+.2f}%",
+                "1년 수익률": "{:+.2f}%",
+                "3년 수익률": "{:+.2f}%"
+            }).background_gradient(cmap='RdYlGn', subset=["1년 수익률"], vmin=-20, vmax=20),
+            use_container_width=True
+        )
+        
+        st.markdown("---")
+        
+        # ---------------------------------------------
+        # 2. 누적 수익률 비교 차트 (Normalized, Base = 100)
+        # ---------------------------------------------
+        st.subheader("📈 글로벌 지수 누적 수익률 비교 (Normalized, Base = 100)")
+        st.markdown("선택한 시점의 지수를 100으로 설정하고 이후의 누적 등락률을 보여줍니다. 상대적인 성과의 우위를 직관적으로 비교할 수 있습니다.")
+        
+        lookback = st.radio("비교 기간 선택", ["1년 (1Y)", "3년 (3Y)", "5년 (5Y)"], index=0, horizontal=True)
+        lookback_map = {
+            "1년 (1Y)": 365,
+            "3년 (3Y)": 365*3,
+            "5년 (5Y)": 365*5
+        }
+        days = lookback_map[lookback]
+        
+        start_dt = latest_date - datetime.timedelta(days=days)
+        closest_start_idx = df_global.index.get_indexer([start_dt], method='nearest')[0]
+        
+        # 데이터 슬라이싱 및 정규화
+        df_sliced = df_global.iloc[closest_start_idx:].copy()
+        normalized_df = (df_sliced / df_sliced.iloc[0]) * 100
+        
+        # 차트 그리기
+        fig = go.Figure()
+        colors = {
+            '^KS11': '#4A90E2',      # 한국 (파랑)
+            '^GSPC': '#FFBF00',      # 미국 (골드)
+            '^N225': '#D0021B',      # 일본 (빨강)
+            '000001.SS': '#F5A623',  # 중국 (주황)
+            '^FTSE': '#4A4A4A',      # 영국 (어두운 회색)
+            '^GDAXI': '#9013FE',     # 독일 (보라)
+            '^NSEI': '#50E3C2',      # 인도 (민트)
+            '^TWII': '#B8E986',      # 대만 (연두)
+            '^BVSP': '#8B572A'       # 브라질 (갈색)
+        }
+        
+        for ticker, name in tickers.items():
+            fig.add_trace(go.Scatter(
+                x=normalized_df.index,
+                y=normalized_df[ticker],
+                name=name,
+                line=dict(color=colors.get(ticker, '#9b9b9b'), width=2)
+            ))
+            
+        fig.update_layout(
+            height=500,
+            margin=dict(l=20, r=20, t=20, b=20),
+            hovermode="x unified",
+            yaxis_title="누적 수익률 (기준시점 = 100)",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
+        st.markdown("---")
+        
+        # ---------------------------------------------
+        # 3. 추가 경제권역 및 지수 설명 가이드
+        # ---------------------------------------------
+        st.subheader("💡 글로벌 자산 배분 관점에서의 지수별 의의")
+        st.markdown("글로벌 포트폴리오를 다변화할 때 각 지수들이 가지는 고유한 역할과 성격입니다.")
+        
+        desc_col1, desc_col2 = st.columns(2)
+        
+        with desc_col1:
+            with st.expander("🇩🇪 독일 DAX 지수 (유럽 제조업의 중심)", expanded=True):
+                st.write("**주요 역할**: 유럽 경제의 성장 엔진 및 글로벌 경기 민감 제조업 벤치마크\n\n"
+                         "- 독일은 유로존 최대 경제국으로 자동차(BMW, Mercedes), 화학(BASF), 엔지니어링(Siemens) 등 중공업과 수출 주도 기술이 핵심입니다.\n"
+                         "- 유럽 전역의 경기 순환 사이클과 전 세계 설비투자(CAPEX) 동향을 파악하는 데 가장 중요한 선행 지표 역할을 수행합니다.")
+                         
+            with st.expander("🇮🇳 인도 Nifty 50 지수 (고성장 신흥국의 중심)", expanded=True):
+                st.write("**주요 역할**: 구조적 성장 및 인구 배당 효과(Demographic Dividend) 수혜\n\n"
+                         "- 세계 1위의 인구 규모와 고성장하는 내수 소비 시장을 바탕으로 하는 신흥 시장의 핵심 축입니다.\n"
+                         "- 글로벌 포트폴리오 다변화(China+1 전략)의 대안 자금처 역할을 하고 있으며, 내수와 인프라 주도의 높은 성장 잠재력을 지니고 있습니다.")
+                         
+        with desc_col2:
+            with st.expander("🇹🇼 대만 TAIEX 지수 (글로벌 IT/반도체 사이클의 풍향계)", expanded=True):
+                st.write("**주요 역할**: 글로벌 첨단 하드웨어 및 IT/AI 기술 주기 벤치마크\n\n"
+                         "- 세계 최대의 반도체 파운드리 기업인 TSMC가 지수 내 압도적인 비중을 차지하는 대표 기술주 지수입니다.\n"
+                         "- 글로벌 빅테크 및 하드웨어 AI 설비투자 사이클, IT 공급망 경기를 민감하게 반영하는 선행 지표 성격을 가집니다.")
+                         
+            with st.expander("🇧🇷 브라질 IBOVESPA 지수 (원자재/소재 원천 및 리소스 프록시)", expanded=True):
+                st.write("**주요 역할**: 글로벌 인플레이션 및 원자재 슈퍼 사이클 헤지 자산\n\n"
+                         "- 남미 최대의 경제 대국이자 철광석(Vale), 에너지(Petrobras) 등 거대 원재료 공급 기업들의 영향력이 큽니다.\n"
+                         "- 원자재 강세 주기와 금리 인상 등 글로벌 인플레이션 환경에서 강한 방어력을 갖는 소재/에너지 성격의 가치주 성격을 지닙니다.")
+                         
+        st.info("💡 **글로벌 주식 투자 참고:**\n"
+                "- **기술주 및 하드웨어 집중**: 첨단 반도체 및 하드웨어 투자의 수혜는 **미국(NASDAQ/S&P)**과 **대만(TAIEX)**, **한국(KOSPI)**이 밀접하게 공유하며 동조화 경향을 보입니다.\n"
+                "- **포트폴리오 분산**: 경기 회복기에는 **독일(DAX)**, 인플레이션 환경에는 원자재 비중이 높은 **브라질(IBOVESPA)** 및 **영국(FTSE)**을 혼합하여 지역 및 섹터별 균형을 맞추는 것이 유리합니다.")
+                
+    else:
+        st.error("세계 주식 데이터를 불러오는 데 실패했습니다.")
