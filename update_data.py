@@ -125,7 +125,8 @@ def update_valuation_csv(market_dt):
     
     # 💡 윈도우 환경/장전 테스트를 위한 안전장치: 장 마감 정산 전(16:30 이전)에 당일 조회를 요청할 경우 
     # 데이터가 없어서 거래소 API가 에러를 내므로 수집 기준일을 어제 날짜로 당깁니다.
-    now = datetime.now()
+    kst_tz = timezone(timedelta(hours=9))
+    now = datetime.now(kst_tz)
     adjusted_dt = market_dt
     if market_dt.date() >= now.date() and now.time() < dt_time(16, 30):
         adjusted_dt = market_dt - timedelta(days=1)
