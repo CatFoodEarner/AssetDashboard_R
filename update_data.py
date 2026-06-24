@@ -167,7 +167,8 @@ def update_valuation_csv(market_dt):
                 
         if merged_df is not None:
             merged_df.index.name = 'Date'
-            merged_df = merged_df.sort_index().ffill()
+            import numpy as np
+            merged_df = merged_df.replace(0.0, np.nan).sort_index().ffill().bfill()
             merged_df.to_csv(csv_file, encoding='utf-8')
             print(f"[SUCCESS] KVALUATION.csv 초기 생성 완료 (행 개수: {len(merged_df)})")
         else:
@@ -183,21 +184,64 @@ def update_valuation_csv(market_dt):
         val_df['Date'] = pd.to_datetime(val_df['Date'])
         val_df = val_df.set_index('Date')
         
-        # 당일 데이터 크롤링 (단일 일자 adjusted_dt 기준 조회)
-        query_date_str = adjusted_dt.strftime("%Y%m%d")
-        for code, name in indices.items():
-            try:
-                df = stock.get_index_fundamental(query_date_str, query_date_str, code)
-                if not df.empty:
-                    val_df.loc[adjusted_dt, f"{name} PER"] = float(df.iloc[0]['PER'])
-                    val_df.loc[adjusted_dt, f"{name} PBR"] = float(df.iloc[0]['PBR'])
-                    print(f"[STATUS] {name} 당일 수집 완료 -> PER: {df.iloc[0]['PER']}, PBR: {df.iloc[0]['PBR']}")
-            except Exception as e:
-                print(f"[ERROR] {name} 당일 수집 실패: {e}")
+        # 기존에 잘못 수집된 0.0 값들을 NaN으로 변환하여 ffill로 자연스럽게 채워지도록 조치
+        import numpy as np
+        val_df = val_df.replace(0.0, np.nan)
+        
+        # market_dt가 인덱스에 없으면 추가 (ffill로 자동 전파하기 위해 미리 자리를 만들어 둠)
+        if market_dt not in val_df.index:
+            val_df.loc[market_dt] = [np.nan] * len(val_df.columns)
+            
+        # 당일 데이터 크롤링 (데이터가 0.0이거나 수집 실패 시 이전 영업일로 역추적하여 수집)
+        max_lookback = 5
+        success_dt = None
+        for attempt in range(max_lookback):
+            query_date_str = adjusted_dt.strftime("%Y%m%d")
+            print(f"[API] pykrx 당일 조회 시도: {adjusted_dt.strftime('%Y-%m-%d')} (시도 {attempt+1}/{max_lookback})")
+            
+            temp_data = {}
+            valid = True
+            for code, name in indices.items():
+                try:
+                    df = stock.get_index_fundamental(query_date_str, query_date_str, code)
+                    if not df.empty:
+                        per = float(df.iloc[0]['PER'])
+                        pbr = float(df.iloc[0]['PBR'])
+                        if per == 0.0 and pbr == 0.0:
+                            valid = False
+                            break
+                        temp_data[f"{name} PER"] = per
+                        temp_data[f"{name} PBR"] = pbr
+                    else:
+                        valid = False
+                        break
+                except Exception as e:
+                    print(f"[ERROR] {name} 수집 중 에러: {e}")
+                    valid = False
+                    break
+            
+            if valid and temp_data:
+                # 모든 지수의 당일 데이터가 정상적으로 들어온 경우 저장
+                for col, val in temp_data.items():
+                    val_df.loc[adjusted_dt, col] = val
+                    if "PER" in col:
+                        pbr_col = col.replace("PER", "PBR")
+                        print(f"[STATUS] {col.split(' ')[0]} 당일 수집 완료 -> PER: {val}, PBR: {temp_data[pbr_col]}")
+                success_dt = adjusted_dt
+                break
+            else:
+                print(f"[WARNING] {adjusted_dt.strftime('%Y-%m-%d')} 데이터가 0.0이거나 정산 전입니다. 이전 영업일로 재시도합니다.")
+                adjusted_dt = adjusted_dt - timedelta(days=1)
                 
+        # 만약 끝내 수집에 실패한 경우 로그 출력
+        if success_dt is None:
+            print("[WARNING] 최근 5 영업일간 유효한 밸류에이션 데이터를 찾지 못했습니다. 기존 데이터를 ffill로 유지합니다.")
+            
         val_df = val_df.sort_index().ffill()
+        # 혹시 ffill 후에도 남아있을 수 있는 첫 행의 결측치는 bfill로 임시 처리
+        val_df = val_df.bfill()
         val_df.to_csv(csv_file, encoding='utf-8')
-        print(f"[SUCCESS] KVALUATION.csv 업데이트 완료 (기준일: {adjusted_dt.strftime('%Y-%m-%d')})")
+        print(f"[SUCCESS] KVALUATION.csv 업데이트 완료 (정산 반영 기준일: {(success_dt or market_dt).strftime('%Y-%m-%d')})")
 
 if __name__ == "__main__":
     update_csv()
