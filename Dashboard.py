@@ -16,7 +16,7 @@ st.set_page_config(page_title="Asset Factor Dashboard", layout="wide")
 # 1. 공통 사이드바 (메뉴 네비게이션)
 # ==========================================
 st.sidebar.title("🧭 투자 자산 대시보드")
-page = st.sidebar.radio("자산군 선택", ["🪙 금 (Gold)", "🇰🇷 한국 주식 (KOSPI)", "💵 단기 크레딧 (Short-term Credit)", "🌍 세계 주식 (Global Equity)", "📊 매크로 대시보드"])
+page = st.sidebar.radio("자산군 선택", ["🪙 금 (Gold)", "🇰🇷 한국 주식 (KOSPI)", "💵 단기 크레딧 (Short-term Credit)", "🌍 세계 주식 (Global Equity)", "📊 매크로 대시보드", "👑 거장의 버블지표"])
 
 # ==========================================
 # 2. 금 (Gold) 페이지 함수 모음
@@ -689,6 +689,79 @@ def load_macro_dashboard_data():
             
     data['KR_Base_Rate'] = bok_df['BOK_Base_Rate']
     
+    return data
+
+
+# ==========================================
+# 10.6. 거장의 버블지표 데이터 로드 (FRED & yfinance)
+# ==========================================
+@st.cache_data(ttl=21600)
+def load_bubble_indicators_data():
+    import datetime
+    import FinanceDataReader as fdr
+    import pandas as pd
+    import yfinance as yf
+    import time
+    
+    end_date = datetime.datetime.now()
+    start_date = end_date - datetime.timedelta(days=365*30) # 30 years to cover 1996 dotcom bubble
+    
+    tickers_fred = {
+        'GDP': 'FRED:GDP',
+        'Equities': 'FRED:BOGZ1FL893064105Q',
+        'Margin': 'FRED:BOGZ1FL663067003Q',
+        'US10Y': 'FRED:DGS10',
+        'US2Y': 'FRED:DGS2',
+        'HY_Spread': 'FRED:BAMLH0A0HYM2'
+    }
+    
+    yf_symbols = {
+        'SP500': '^GSPC',
+        'Russell2000': '^RUT',
+        'VIX': '^VIX',
+        'SP500_Top20': '^SP500-20',
+        'SP500_Top50': '^SP500-50',
+        'KOSPI50_ETF': '137610.KS',
+        'KOSPI': '^KS11'
+    }
+    
+    data = {}
+    max_retries = 3
+    
+    for name, ticker in tickers_fred.items():
+        success = False
+        for attempt in range(max_retries):
+            try:
+                df = fdr.DataReader(ticker, start_date, end_date)
+                if df is not None and not df.empty:
+                    series = pd.to_numeric(df.iloc[:, 0], errors='coerce').ffill().bfill()
+                    series.index = pd.to_datetime(series.index).tz_localize(None).normalize()
+                    data[name] = series
+                    success = True
+                    break
+            except Exception:
+                pass
+            time.sleep(0.5)
+        if not success:
+            data[name] = pd.Series(dtype=float)
+            
+    for name, symbol in yf_symbols.items():
+        success = False
+        for attempt in range(max_retries):
+            try:
+                df = yf.Ticker(symbol).history(start=start_date, end=end_date)
+                if df is not None and not df.empty:
+                    series = pd.to_numeric(df['Close'], errors='coerce').ffill().bfill()
+                    series.index = pd.to_datetime(series.index).tz_localize(None).normalize()
+                    data[name] = series
+                    success = True
+                    break
+            except Exception:
+                pass
+            time.sleep(0.5)
+        if not success:
+            data[name] = pd.Series(dtype=float)
+            
     return data
 
 
@@ -1531,4 +1604,358 @@ elif page == "📊 매크로 대시보드":
                 "2. **순환 분석**: 아웃풋 갭이 마이너스(-)일 때 정부/중앙은행의 부양책에 힘입어 주가가 바닥을 다질 가능성이 높으므로 분할 매수 기회로 삼으세요. 반대로 플러스(+) 영역이 깊어지면 과열을 주의해야 합니다.\n"
                 "3. **위험 관리**: 미국 장단기 금리 역전 현상이 심해진 이후 환율이 급등하는 구간이 오면 안전 자산(금, 달러 예금)의 비중을 높여 변동성에 대비하세요.")
     else:
-        st.error("매크로 데이터를 가져올 수 없었습니다.")
+        st.error("매크로 데이터를 가져올 수 없었습니다.")
+
+elif page == "👑 거장의 버블지표":
+    st.title("👑 거장들의 버블 진단 및 대응 전략")
+    st.markdown("역사적인 투자 거장들이 사용했던 버블 신호 지표들을 최신 마켓 데이터와 비교 분석합니다.")
+    
+    with st.spinner("버블 지표 데이터를 불러오는 중..."):
+        bubble_data = load_bubble_indicators_data()
+        
+    if bubble_data:
+        # st.tabs로 4명의 거장 분할
+        tab_ptj, tab_grantham, tab_fisher, tab_buffett = st.tabs([
+            "📈 폴 튜더 존스 (레버리지 & 금리)",
+            "📉 제레미 그랜섬 (메가캡 & 다이버전스)",
+            "📊 켄 피셔 (낙관론 & 3분의 1 법칙)",
+            "🪙 워런 버핏 (버핏 지수 & Valuation)"
+        ])
+        
+        # -------------------------------------------------------------
+        # Tab 1: 폴 튜더 존스
+        # -------------------------------------------------------------
+        with tab_ptj:
+            st.subheader("폴 튜더 존스 (Paul Tudor Jones)의 버블 진단")
+            st.markdown("> *\"마지막 상승을 즐기되, 늘 출구를 주시하라.\"*")
+            st.markdown("**버블 붕괴 시그널**:")
+            st.markdown("1. **채권 금리의 급격한 발작적 상승**: 기관들이 감당하지 못하는 자금 경색 유발.")
+            st.markdown("2. **시가총액 대비 레버리지 비율의 극단적 상승**: 주식 시장의 규모 대비 빚(신용 잔고)이 닷컴 버블 수준을 상회할 때.")
+            
+            # 데이터 준비
+            margin = bubble_data.get('Margin', pd.Series(dtype=float))
+            equities = bubble_data.get('Equities', pd.Series(dtype=float))
+            us10y = bubble_data.get('US10Y', pd.Series(dtype=float))
+            hy_spread = bubble_data.get('HY_Spread', pd.Series(dtype=float))
+            
+            # 1. 레버리지 비율 차트
+            st.markdown("#### 1. 미국 주식 시장 시가총액 대비 레버리지(마진론) 비율")
+            if not margin.empty and not equities.empty:
+                df_lev = pd.DataFrame({'Margin': margin, 'Equities': equities}).ffill().dropna()
+                # Margin은 Millions, Equities도 Millions이므로 단순 나눗셈 * 100
+                df_lev['Ratio'] = (df_lev['Margin'] / df_lev['Equities']) * 100
+                
+                # 최신값
+                latest_ratio = df_lev['Ratio'].iloc[-1]
+                latest_date_str = df_lev.index[-1].strftime('%Y-%m')
+                
+                # 메트릭 표시
+                col_ptj1, col_ptj2, col_ptj3 = st.columns(3)
+                col_ptj1.metric(f"현재 레버리지 비율 ({latest_date_str})", f"{latest_ratio:.3f} %")
+                col_ptj2.metric("닷컴 버블 당시 peak (2000-01)", "1.261 %")
+                col_ptj3.metric("금융 위기 당시 peak (2008-07)", "1.708 %")
+                
+                fig_lev = go.Figure()
+                fig_lev.add_trace(go.Scatter(x=df_lev.index, y=df_lev['Ratio'], name='마진론 / 시가총액 비율', line=dict(color='#d62728', width=2.5)))
+                
+                # 닷컴 버블과 금융위기 어노테이션 추가
+                fig_lev.add_hline(y=1.261, line_dash="dash", line_color="#FF9900", annotation_text="닷컴 버블 peak (1.26%)")
+                fig_lev.add_hline(y=1.708, line_dash="dash", line_color="#CC0000", annotation_text="금융 위기 peak (1.71%)")
+                
+                fig_lev.update_layout(
+                    height=350,
+                    margin=dict(l=20, r=20, t=20, b=20),
+                    yaxis_title="비율 (%)",
+                    hovermode="x unified"
+                )
+                st.plotly_chart(fig_lev, use_container_width=True)
+                
+                st.info("💡 **폴 튜더 존스의 현대적 해석:**\n"
+                        "- 최근의 마진 데트 비율(~0.58%)이 역사적 고점에 비해 매우 낮게 나타나는 이유는 **미국 빅테크의 엄청난 시가총액 성장**으로 인해 분모(Equities)가 극대화된 착시가 큽니다.\n"
+                        "- 또한 현대 금융 시장에서는 단순 마진 데트(신용 융자) 외에도 **레버리지 ETF, 콜옵션 매수, 합성 레버리지(스왑)** 등 보이지 않는 레버리지가 지수 전반에 넓게 파고들어 있습니다. 이에 따라 존스는 실제 숨겨진 총 레버리지가 닷컴 버블 시절보다 높을 수 있다고 경고합니다.")
+            else:
+                st.error("레버리지 비율 데이터를 구성할 수 없습니다.")
+                
+            # 2. 금리 발작 및 신용 스프레드 차트
+            st.markdown("#### 2. 금리 발작 및 신용 스프레드 (채권 시장 스트레스)")
+            if not us10y.empty:
+                # 10년물 금리의 21거래일(1개월)전 대비 변동폭 계산
+                df_bond = pd.DataFrame({'US10Y': us10y, 'HY_Spread': hy_spread}).ffill().bfill()
+                df_bond['US10Y_Change_1M'] = df_bond['US10Y'].diff(periods=21)
+                
+                col_ptj_b1, col_ptj_b2 = st.columns(2)
+                
+                with col_ptj_b1:
+                    st.markdown("**📉 미국 10년물 국채 금리의 1개월 변동 속도 (Rate of Change)**")
+                    st.write("금리가 급격하게 상승할 때 채권 시장과 주식 시장은 강력한 충격을 받습니다.")
+                    
+                    fig_bond_ch = go.Figure()
+                    fig_bond_ch.add_trace(go.Scatter(x=df_bond.index, y=df_bond['US10Y_Change_1M'], name='10년물 금리 1M 변동폭 (%p)', line=dict(color='#FF8000', width=1.5)))
+                    fig_bond_ch.add_hline(y=0.5, line_dash="dash", line_color="red", annotation_text="경계 수준 (+0.5%p)")
+                    fig_bond_ch.add_hline(y=-0.5, line_dash="dash", line_color="green")
+                    fig_bond_ch.update_layout(
+                        height=250, margin=dict(l=10, r=10, t=10, b=10),
+                        yaxis_title="변동폭 (%p)", hovermode="x unified"
+                    )
+                    st.plotly_chart(fig_bond_ch, use_container_width=True)
+                    
+                with col_ptj_b2:
+                    st.markdown("**🌊 미국 하이일드 채권 스프레드 (High Yield Spread)**")
+                    st.write("부도 위험이 높은 기업의 가산금리로, 신용 시장의 위기 수준을 즉각 나타냅니다.")
+                    
+                    fig_hy = go.Figure()
+                    fig_hy.add_trace(go.Scatter(x=df_bond.index, y=df_bond['HY_Spread'], name='하이일드 스프레드 (%p)', line=dict(color='#990099', width=1.5)))
+                    fig_hy.add_hline(y=4.5, line_dash="dash", line_color="orange", annotation_text="경계 (4.5%p)")
+                    fig_hy.add_hline(y=6.0, line_dash="dash", line_color="red", annotation_text="위험 (6.0%p)")
+                    fig_hy.update_layout(
+                        height=250, margin=dict(l=10, r=10, t=10, b=10),
+                        yaxis_title="스프레드 (%p)", hovermode="x unified"
+                    )
+                    st.plotly_chart(fig_hy, use_container_width=True)
+            else:
+                st.error("금리 데이터를 불러올 수 없습니다.")
+                
+        # -------------------------------------------------------------
+        # Tab 2: 제레미 그랜섬
+        # -------------------------------------------------------------
+        with tab_grantham:
+            st.subheader("제레미 그랜섬 (Jeremy Grantham)의 버블 진단")
+            st.markdown("> *\"하락 베팅은 피하고 저평가 우량 자산으로 대피하라.\"*")
+            st.markdown("**버블 붕괴 시그널**:")
+            st.markdown("- **하락 다이버전스 (Divergence)**: 시장 전체를 이끌던 투기주/소형주가 먼저 꺾여 내려가는데도, 초대형주(Mega-Cap) 홀로 전체 지수를 끌어올리며 지수 자체는 상승하는 기이한 독주 현상.")
+            
+            sp500 = bubble_data.get('SP500', pd.Series(dtype=float))
+            russell2000 = bubble_data.get('Russell2000', pd.Series(dtype=float))
+            sp500_top20 = bubble_data.get('SP500_Top20', pd.Series(dtype=float))
+            sp500_top50 = bubble_data.get('SP500_Top50', pd.Series(dtype=float))
+            kospi = bubble_data.get('KOSPI', pd.Series(dtype=float))
+            kospi50_etf = bubble_data.get('KOSPI50_ETF', pd.Series(dtype=float))
+            
+            # 한국 주식 소형주 데이터
+            kr_df = load_korean_market_data()
+            
+            tab_g_us, tab_g_kr = st.tabs(["🇺🇸 미국 시장 분석 (S&P 500 & Mega-Cap)", "🇰🇷 한국 시장 분석 (KOSPI & KOSPI 50)"])
+            
+            with tab_g_us:
+                st.markdown("#### 1. 미국 메가캡 쏠림 지표 (S&P 500 Top 20/50 vs S&P 500)")
+                st.write("초대형주들의 아웃퍼폼 비중을 비교합니다. 이 비율이 급격히 치솟는 것은 소수 기업에 대한 과도한 수급 집중을 의미합니다.")
+                
+                if not sp500.empty and not sp500_top20.empty and not sp500_top50.empty:
+                    df_us_g = pd.DataFrame({
+                        'SP500': sp500,
+                        'Top20': sp500_top20,
+                        'Top50': sp500_top50,
+                        'Russell': russell2000
+                    }).ffill().dropna()
+                    
+                    df_us_g['Top20_Ratio'] = df_us_g['Top20'] / df_us_g['SP500']
+                    df_us_g['Top50_Ratio'] = df_us_g['Top50'] / df_us_g['SP500']
+                    df_us_g['Small_Ratio'] = df_us_g['Russell'] / df_us_g['SP500']
+                    
+                    # 최근 10년만 필터링해서 자세히 보기
+                    df_us_g_10y = df_us_g.tail(2520)
+                    
+                    fig_us_mega = make_subplots(specs=[[{"secondary_y": True}]])
+                    fig_us_mega.add_trace(go.Scatter(x=df_us_g_10y.index, y=df_us_g_10y['Top20_Ratio'], name='Top 20 / S&P 500 (좌축)', line=dict(color='#1f77b4', width=2)), secondary_y=False)
+                    fig_us_mega.add_trace(go.Scatter(x=df_us_g_10y.index, y=df_us_g_10y['Top50_Ratio'], name='Top 50 / S&P 500 (좌축)', line=dict(color='#aec7e8', width=1.5, dash='dash')), secondary_y=False)
+                    fig_us_mega.add_trace(go.Scatter(x=df_us_g_10y.index, y=df_us_g_10y['SP500'], name='S&P 500 지수 (우축)', line=dict(color='#ff7f0e', width=2)), secondary_y=True)
+                    
+                    fig_us_mega.update_layout(
+                        height=350, margin=dict(l=20, r=20, t=20, b=20),
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                        hovermode="x unified"
+                    )
+                    fig_us_mega.update_yaxes(title_text="메가캡 상대비율", secondary_y=False)
+                    fig_us_mega.update_yaxes(title_text="S&P 500 지수 (pt)", secondary_y=True)
+                    st.plotly_chart(fig_us_mega, use_container_width=True)
+                    
+                    st.markdown("#### 2. 미국 투기주/소형주 상대 강도 (Russell 2000 / S&P 500)")
+                    st.write("중소형주의 상대 퍼포먼스를 보여줍니다. 지수가 오르는데 이 비율이 흘러내린다면 시장의 하부(Market Breadth)가 취약해지고 있음을 나타냅니다.")
+                    
+                    fig_us_small = make_subplots(specs=[[{"secondary_y": True}]])
+                    fig_us_small.add_trace(go.Scatter(x=df_us_g_10y.index, y=df_us_g_10y['Small_Ratio'], name='Russell 2000 / S&P 500 (좌축)', line=dict(color='#2ca02c', width=2)), secondary_y=False)
+                    fig_us_small.add_trace(go.Scatter(x=df_us_g_10y.index, y=df_us_g_10y['SP500'], name='S&P 500 지수 (우축)', line=dict(color='#ff7f0e', width=1.5, dash='dot')), secondary_y=True)
+                    
+                    fig_us_small.update_layout(
+                        height=300, margin=dict(l=20, r=20, t=20, b=20),
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                        hovermode="x unified"
+                    )
+                    fig_us_small.update_yaxes(title_text="소형주 상대비율", secondary_y=False)
+                    fig_us_small.update_yaxes(title_text="S&P 500 지수 (pt)", secondary_y=True)
+                    st.plotly_chart(fig_us_small, use_container_width=True)
+                else:
+                    st.error("미국 주식 지표 데이터를 수집하지 못했습니다.")
+                    
+            with tab_g_kr:
+                st.markdown("#### 1. 한국 메가캡 쏠림 지표 (KOSPI 50 ETF / KOSPI 지수)")
+                st.write("KOSPI 50 ETF 가격을 KOSPI 종합지수로 나누어 메가캡 주도 비율을 측정합니다. (시작 시점 100으로 정규화)")
+                
+                if not kospi.empty and not kospi50_etf.empty:
+                    df_kr_g = pd.DataFrame({
+                        'KOSPI': kospi,
+                        'KOSPI50_ETF': kospi50_etf
+                    }).ffill().dropna()
+                    
+                    first_ratio = df_kr_g['KOSPI50_ETF'].iloc[0] / df_kr_g['KOSPI'].iloc[0]
+                    df_kr_g['Mega_Ratio'] = (df_kr_g['KOSPI50_ETF'] / df_kr_g['KOSPI']) / first_ratio * 100
+                    
+                    fig_kr_mega = make_subplots(specs=[[{"secondary_y": True}]])
+                    fig_kr_mega.add_trace(go.Scatter(x=df_kr_g.index, y=df_kr_g['Mega_Ratio'], name='KOSPI 50 / KOSPI (좌축, Base=100)', line=dict(color='#1f77b4', width=2)), secondary_y=False)
+                    fig_kr_mega.add_trace(go.Scatter(x=df_kr_g.index, y=df_kr_g['KOSPI'], name='KOSPI 지수 (우축)', line=dict(color='#d62728', width=2)), secondary_y=True)
+                    
+                    fig_kr_mega.update_layout(
+                        height=350, margin=dict(l=20, r=20, t=20, b=20),
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                        hovermode="x unified"
+                    )
+                    fig_kr_mega.update_yaxes(title_text="KOSPI 50 상대강도 (Base=100)", secondary_y=False)
+                    fig_kr_mega.update_yaxes(title_text="KOSPI 지수 (pt)", secondary_y=True)
+                    st.plotly_chart(fig_kr_mega, use_container_width=True)
+                else:
+                    st.error("KOSPI 50 ETF 혹은 KOSPI 데이터를 수집하지 못했습니다.")
+                    
+                st.markdown("#### 2. 한국 소형주 상대 강도 (KOSPI 소형주 / KOSPI 200)")
+                st.write("코스피 소형주 지수와 대형주 200 지수의 상대 강도를 보여줍니다.")
+                
+                if not kr_df.empty and 'KOSPI4' in kr_df.columns:
+                    df_kr_small = kr_df[['KOSPI4', 'KOSPI200']].ffill().dropna()
+                    first_kr_ratio = df_kr_small['KOSPI4'].iloc[0] / df_kr_small['KOSPI200'].iloc[0]
+                    df_kr_small['Small_Ratio'] = (df_kr_small['KOSPI4'] / df_kr_small['KOSPI200']) / first_kr_ratio * 100
+                    
+                    fig_kr_small = make_subplots(specs=[[{"secondary_y": True}]])
+                    fig_kr_small.add_trace(go.Scatter(x=df_kr_small.index, y=df_kr_small['Small_Ratio'], name='KOSPI 소형주 / KOSPI 200 (좌축, Base=100)', line=dict(color='#2ca02c', width=2)), secondary_y=False)
+                    fig_kr_small.add_trace(go.Scatter(x=df_kr_small.index, y=df_kr_small['KOSPI200'], name='KOSPI 200 지수 (우축)', line=dict(color='#ff7f0e', width=1.5, dash='dot')), secondary_y=True)
+                    
+                    fig_kr_small.update_layout(
+                        height=300, margin=dict(l=20, r=20, t=20, b=20),
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                        hovermode="x unified"
+                    )
+                    fig_kr_small.update_yaxes(title_text="소형주 상대강도 (Base=100)", secondary_y=False)
+                    fig_kr_small.update_yaxes(title_text="KOSPI 200 지수 (pt)", secondary_y=True)
+                    st.plotly_chart(fig_kr_small, use_container_width=True)
+                else:
+                    st.info("KOSPI 소형주 지수 데이터를 로드하지 못했습니다.")
+                    
+        # -------------------------------------------------------------
+        # Tab 3: 켄 피셔
+        # -------------------------------------------------------------
+        with tab_fisher:
+            st.subheader("켄 피셔 (Ken Fisher)의 버블 진단")
+            st.markdown("> *\"하락장의 막판 폭락 구간만은 피해라.\"*")
+            st.markdown("**켄 피셔의 하락장 3분의 1 법칙**:")
+            st.markdown("- 일반적인 약세장은 **전체 기간의 앞선 2/3 동안 총 하락폭의 1/3만 서서히 하락**하지만, **마지막 1/3 기간에 나머지 2/3의 하락폭을 한번에 쏟아내는** 폭락 패턴을 보입니다.")
+            st.markdown("- 피셔는 전체 하락장을 다 피하려 하기보단, 하락 추세가 완연해졌을 때 과감하게 손절하고 나와 마지막 1/3의 파멸적 낙폭만 우회하는 것이 가장 실질적인 대처법이라고 조언합니다.")
+            st.markdown("- **Complacency (대중의 자기합리화)**: 하락세가 시작되었는데도 대중이 위기를 느끼지 못하고 계속 '바닥 줍기(Buy the dip)'에 나설 때가 가장 위험합니다.")
+            
+            sp500 = bubble_data.get('SP500', pd.Series(dtype=float))
+            vix = bubble_data.get('VIX', pd.Series(dtype=float))
+            
+            st.markdown("#### 📉 미국 S&P 500 지수 vs VIX 변동성 지수 ( complacency Indicator )")
+            st.write("주가가 장기 이평선을 하회하여 약세장에 들어설 때, VIX 변동성 지수가 여전히 낮게 유지되는지 확인하세요. 변동성이 터지지 않는 잔잔한 하락은 진짜 바닥이 아닐 가능성이 높습니다.")
+            
+            if not sp500.empty and not vix.empty:
+                df_fish = pd.DataFrame({'SP500': sp500, 'VIX': vix}).ffill().dropna()
+                df_fish['SMA50'] = df_fish['SP500'].rolling(window=50).mean()
+                df_fish['SMA200'] = df_fish['SP500'].rolling(window=200).mean()
+                
+                # 최근 3년 필터링
+                df_fish_3y = df_fish.tail(252 * 3)
+                
+                fig_fish = make_subplots(specs=[[{"secondary_y": True}]])
+                fig_fish.add_trace(go.Scatter(x=df_fish_3y.index, y=df_fish_3y['SP500'], name='S&P 500 지수 (좌축)', line=dict(color='#ff7f0e', width=2)), secondary_y=False)
+                fig_fish.add_trace(go.Scatter(x=df_fish_3y.index, y=df_fish_3y['SMA50'], name='50일 이평선 (좌축)', line=dict(color='#1f77b4', width=1, dash='dot')), secondary_y=False)
+                fig_fish.add_trace(go.Scatter(x=df_fish_3y.index, y=df_fish_3y['SMA200'], name='200일 이평선 (좌축)', line=dict(color='#d62728', width=1.5, dash='dash')), secondary_y=False)
+                fig_fish.add_trace(go.Scatter(x=df_fish_3y.index, y=df_fish_3y['VIX'], name='VIX 변동성 지수 (우축)', line=dict(color='#9467bd', width=1.5)), secondary_y=True)
+                
+                fig_fish.update_layout(
+                    height=450, margin=dict(l=20, r=20, t=20, b=20),
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    hovermode="x unified"
+                )
+                fig_fish.update_yaxes(title_text="S&P 500 지수 (pt)", secondary_y=False)
+                fig_fish.update_yaxes(title_text="VIX 지수", secondary_y=True)
+                st.plotly_chart(fig_fish, use_container_width=True)
+                
+                # 켄 피셔 진단 신호
+                is_bear_trend = df_fish['SP500'].iloc[-1] < df_fish['SMA200'].iloc[-1]
+                vix_level = df_fish['VIX'].iloc[-1]
+                
+                st.markdown("#### 🚨 현재 변동성 및 추세 기반 진단")
+                col_f1, col_f2, col_f3 = st.columns(3)
+                
+                if is_bear_trend:
+                    col_f1.error("시장 추세: 약세장 국면 (주가 < 200일선)")
+                else:
+                    col_f1.success("시장 추세: 강세장 유지 (주가 > 200일선)")
+                    
+                col_f2.metric("현재 VIX 변동성", f"{vix_level:.2f}")
+                
+                if is_bear_trend and vix_level < 20:
+                    col_f3.error("자가합리화 상태 (Complacency): 높음! 주의 필요.")
+                elif is_bear_trend and vix_level >= 30:
+                    col_f3.success("자가합리화 상태 (Complacency): 낮음 (공포 피크 도달)")
+                else:
+                    col_f3.info("자가합리화 상태 (Complacency): 보통")
+            else:
+                st.error("미국 지수 및 VIX 데이터를 로드할 수 없습니다.")
+                
+        # -------------------------------------------------------------
+        # Tab 4: 워런 버핏
+        # -------------------------------------------------------------
+        with tab_buffett:
+            st.subheader("워런 버핏 (Warren Buffett)의 버블 진단")
+            st.markdown("> *\"리스크에 대비한 현금 확보. 시장이 비쌀 때는 가치를 따져 사려 깊게 움직여라.\"*")
+            st.markdown("**버핏 지수 (Buffett Indicator)**:")
+            st.markdown("- 국가의 경제 활동 총량(Nominal GDP) 대비 전체 상장 주식의 시가총액(Corporate Equities Liability) 비율입니다.")
+            st.markdown("- **평가 기준 (미국 기준)**:\n"
+                        "  - 80% 이하: 저평가 (강력 매수)\n"
+                        "  - 80%~120%: 역사적 정상 범위\n"
+                        "  - 120%~150%: 다소 고평가\n"
+                        "  - 150% 이상: 극심한 고평가 (버블 의심)")
+            
+            gdp = bubble_data.get('GDP', pd.Series(dtype=float))
+            equities = bubble_data.get('Equities', pd.Series(dtype=float))
+            
+            st.markdown("#### 📈 미국 버핏 지수 (시가총액 / GDP %)")
+            if not gdp.empty and not equities.empty:
+                df_buf = pd.DataFrame({'GDP': gdp, 'Equities': equities}).ffill().dropna()
+                df_buf['Buffett'] = (df_buf['Equities'] / (df_buf['GDP'] * 1000)) * 100
+                
+                latest_buf = df_buf['Buffett'].iloc[-1]
+                latest_buf_date = df_buf.index[-1].strftime('%Y-%m')
+                
+                col_b1, col_b2, col_b3 = st.columns(3)
+                col_b1.metric(f"현재 미국 버핏 지수 ({latest_buf_date})", f"{latest_buf:.1f} %")
+                col_b2.metric("역사적 중간값 (Median)", "167.9 %")
+                
+                if latest_buf >= 200:
+                    status_text = "🔴 극단적 고평가 (Overvalued)"
+                    col_b3.markdown(f"**현재 시장 진단:**\n### {status_text}")
+                elif latest_buf >= 140:
+                    status_text = "🟡 고평가 (Fairly Valued)"
+                    col_b3.markdown(f"**현재 시장 진단:**\n### {status_text}")
+                else:
+                    status_text = "🟢 매수 구간 (Undervalued)"
+                    col_b3.markdown(f"**현재 시장 진단:**\n### {status_text}")
+                    
+                fig_buf = go.Figure()
+                fig_buf.add_trace(go.Scatter(x=df_buf.index, y=df_buf['Buffett'], name='버핏 지수 (%)', line=dict(color='#FFBF00', width=2.5)))
+                
+                # 밴드 추가
+                fig_buf.add_hline(y=100.0, line_dash="dash", line_color="green", annotation_text="정상 범위 하한 (100%)")
+                fig_buf.add_hline(y=150.0, line_dash="dash", line_color="orange", annotation_text="경계 영역 (150%)")
+                fig_buf.add_hline(y=200.0, line_dash="dash", line_color="red", annotation_text="버블 주의보 (200%)")
+                
+                fig_buf.update_layout(
+                    height=400,
+                    margin=dict(l=20, r=20, t=20, b=20),
+                    yaxis_title="지수 (%)",
+                    hovermode="x unified"
+                )
+                st.plotly_chart(fig_buf, use_container_width=True)
+            else:
+                st.error("버핏 지수 데이터를 표시할 수 없습니다.")
+    else:
+        st.error("거장의 버블지표 데이터를 로드할 수 없었습니다.")
