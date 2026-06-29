@@ -16,7 +16,7 @@ st.set_page_config(page_title="Asset Factor Dashboard", layout="wide")
 # 1. 공통 사이드바 (메뉴 네비게이션)
 # ==========================================
 st.sidebar.title("🧭 투자 자산 대시보드")
-page = st.sidebar.radio("자산군 선택", ["🪙 금 (Gold)", "🇰🇷 한국 주식 (KOSPI)", "💵 단기 크레딧 (Short-term Credit)", "🌍 세계 주식 (Global Equity)"])
+page = st.sidebar.radio("자산군 선택", ["🪙 금 (Gold)", "🇰🇷 한국 주식 (KOSPI)", "💵 단기 크레딧 (Short-term Credit)", "🌍 세계 주식 (Global Equity)", "📊 매크로 대시보드"])
 
 # ==========================================
 # 2. 금 (Gold) 페이지 함수 모음
@@ -619,6 +619,77 @@ def load_global_market_data():
             fallback_df[ticker] = prices
         fallback_df.index = pd.to_datetime(fallback_df.index).tz_localize(None).normalize()
         return fallback_df, tickers
+
+
+# ==========================================
+# 10.5. 매크로 대시보드 데이터 로드 (FRED & BOK Base Rate)
+# ==========================================
+@st.cache_data(ttl=21600)
+def load_macro_dashboard_data():
+    import datetime
+    import FinanceDataReader as fdr
+    import pandas as pd
+    import time
+    
+    end_date = datetime.datetime.now()
+    start_date = end_date - datetime.timedelta(days=365*10)
+    
+    tickers = {
+        'US_Base_Rate': 'FRED:DFF',
+        'US_10Y': 'FRED:DGS10',
+        'US_2Y': 'FRED:DGS2',
+        'US_Real_GDP': 'FRED:GDPC1',
+        'US_Potential_GDP': 'FRED:GDPPOT',
+        'US_Productivity': 'FRED:OPHNFB',
+        'KR_10Y': 'FRED:IRLTLT01KRM156N',
+        'USD_KRW': 'FRED:DEXKOUS'
+    }
+    
+    data = {}
+    max_retries = 3
+    for name, ticker in tickers.items():
+        success = False
+        for attempt in range(max_retries):
+            try:
+                df = fdr.DataReader(ticker, start_date, end_date)
+                if df is not None and not df.empty:
+                    series = pd.to_numeric(df.iloc[:, 0], errors='coerce')
+                    data[name] = series.ffill().bfill()
+                    success = True
+                    break
+            except Exception:
+                pass
+            time.sleep(1)
+        if not success:
+            data[name] = pd.Series(dtype=float)
+            
+    # 한국 기준금리 (BOK Base Rate) 10개년 시계열 생성 (정확한 step function)
+    bok_changes = [
+        ('2015-03-12', 1.75), ('2015-06-11', 1.50), ('2016-06-09', 1.25),
+        ('2017-11-30', 1.50), ('2018-11-30', 1.75), ('2019-07-18', 1.50),
+        ('2019-10-16', 1.25), ('2020-03-17', 0.75), ('2020-05-28', 0.50),
+        ('2021-08-26', 0.75), ('2021-11-25', 1.00), ('2022-01-14', 1.25),
+        ('2022-04-14', 1.50), ('2022-05-26', 1.75), ('2022-07-13', 2.25),
+        ('2022-08-25', 2.50), ('2022-10-12', 3.00), ('2022-11-24', 3.25),
+        ('2023-01-13', 3.50), ('2024-10-11', 3.25), ('2024-11-28', 3.00),
+        ('2025-02-25', 2.75), ('2025-05-29', 2.50)
+    ]
+    
+    date_range = pd.date_range(start=start_date, end=end_date, freq='D')
+    bok_df = pd.DataFrame(index=date_range)
+    bok_df['BOK_Base_Rate'] = 2.00 # 2015년 초 기본값
+    
+    bok_changes_sorted = sorted(bok_changes, key=lambda x: x[0])
+    for date_str, rate in bok_changes_sorted:
+        dt = pd.to_datetime(date_str)
+        if dt in bok_df.index:
+            bok_df.loc[dt:, 'BOK_Base_Rate'] = rate
+        elif dt < bok_df.index[0]:
+            bok_df['BOK_Base_Rate'] = rate
+            
+    data['KR_Base_Rate'] = bok_df['BOK_Base_Rate']
+    
+    return data
 
 
 # ==========================================
@@ -1242,4 +1313,213 @@ elif page == "🌍 세계 주식 (Global Equity)":
                 "- **포트폴리오 분산**: 경기 회복기에는 **독일(DAX)**, 인플레이션 환경에는 원자재 비중이 높은 **브라질(IBOVESPA)** 및 **영국(FTSE)**을 혼합하여 지역 및 섹터별 균형을 맞추는 것이 유리합니다.")
                 
     else:
-        st.error("세계 주식 데이터를 불러오는 데 실패했습니다.")
+        st.error("세계 주식 데이터를 불러오는 데 실패했습니다.")
+
+elif page == "📊 매크로 대시보드":
+    st.title("📊 글로벌 매크로 대시보드")
+    st.markdown("경제의 장기 **'추세(Trend)'**와 단기 **'순환(Cycle)'**을 보여주는 경제 지표들을 분석하여 글로벌 금융 시장의 방향성을 조망합니다.")
+    
+    with st.spinner("FRED 매크로 데이터를 불러오는 중..."):
+        macro_data = load_macro_dashboard_data()
+        
+    if macro_data:
+        # 0. 데이터 정렬 및 기본값 검사
+        us_base = macro_data.get('US_Base_Rate', pd.Series(dtype=float))
+        kr_base = macro_data.get('KR_Base_Rate', pd.Series(dtype=float))
+        us_10y = macro_data.get('US_10Y', pd.Series(dtype=float))
+        us_2y = macro_data.get('US_2Y', pd.Series(dtype=float))
+        kr_10y = macro_data.get('KR_10Y', pd.Series(dtype=float))
+        usd_krw = macro_data.get('USD_KRW', pd.Series(dtype=float))
+        us_gdp = macro_data.get('US_Real_GDP', pd.Series(dtype=float))
+        us_pot = macro_data.get('US_Potential_GDP', pd.Series(dtype=float))
+        us_prod = macro_data.get('US_Productivity', pd.Series(dtype=float))
+        
+        # 1. 상단 핵심 경제 지표 요약 (Metric Cards)
+        st.subheader("📌 주요 매크로 지표 현황")
+        m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+        
+        if not us_base.empty:
+            m_col1.metric("미국 기준금리 (Fed Funds)", f"{us_base.iloc[-1]:.2f}%")
+        else:
+            m_col1.metric("미국 기준금리 (Fed Funds)", "데이터 없음")
+            
+        if not kr_base.empty:
+            m_col2.metric("한국 기준금리 (BOK)", f"{kr_base.iloc[-1]:.2f}%")
+        else:
+            m_col2.metric("한국 기준금리 (BOK)", "데이터 없음")
+            
+        if not usd_krw.empty:
+            m_col3.metric("원/달러 환율 (USD/KRW)", f"{usd_krw.iloc[-1]:,.2f}원")
+        else:
+            m_col3.metric("원/달러 환율 (USD/KRW)", "데이터 없음")
+            
+        # 최신 아웃풋 갭 계산
+        latest_gap = None
+        if not us_gdp.empty and not us_pot.empty:
+            df_gdp_align = pd.DataFrame({'Real': us_gdp, 'Pot': us_pot}).dropna()
+            if not df_gdp_align.empty:
+                df_gdp_align['Gap'] = 100 * (df_gdp_align['Real'] - df_gdp_align['Pot']) / df_gdp_align['Pot']
+                latest_gap = df_gdp_align['Gap'].iloc[-1]
+                gap_date = df_gdp_align.index[-1].strftime('%Y-%m')
+                m_col4.metric(f"미국 아웃풋 갭 ({gap_date})", f"{latest_gap:+.2f}%")
+        
+        if latest_gap is None:
+            m_col4.metric("미국 아웃풋 갭", "데이터 없음")
+            
+        st.markdown("---")
+        
+        # 2. 경제의 순환과 추세 섹션
+        st.subheader("💡 1단계: 경제의 장기 '추세'와 단기 '순환'")
+        st.markdown("성공적인 투자를 위해서는 장기적으로 성장하는 **'추세'**를 확인하고, **'순환(사이클)'** 지표를 통해 불황과 호황의 타이밍을 포착해야 합니다.")
+        
+        trend_col1, trend_col2 = st.columns(2)
+        
+        with trend_col1:
+            st.markdown("#### 1. 경제의 순환: 아웃풋 갭 (Output Gap)")
+            st.write("실제 GDP가 잠재 GDP(장기적인 성장 추세선)에서 얼마나 벗어나 있는지를 보여줍니다.")
+            st.write("- **플러스(+)**: 경기 과열 (수요 초과, 인플레이션 위험)")
+            st.write("- **마이너스(-)**: 경기 침체 (공급 과잉, 실업 발생, 물가 하락) ➡️ **주식 분할 매수 타이밍**")
+            
+            if not us_gdp.empty and not us_pot.empty:
+                df_gap = pd.DataFrame({'Real': us_gdp, 'Pot': us_pot}).dropna()
+                df_gap['Output_Gap'] = 100 * (df_gap['Real'] - df_gap['Pot']) / df_gap['Pot']
+                
+                fig_gap = go.Figure()
+                fig_gap.add_trace(go.Bar(
+                    x=df_gap.index,
+                    y=df_gap['Output_Gap'],
+                    name='Output Gap (%)',
+                    marker_color=df_gap['Output_Gap'].apply(lambda x: '#D0021B' if x < 0 else '#4A90E2')
+                ))
+                fig_gap.add_hline(y=0.0, line_dash="dash", line_color="black")
+                fig_gap.update_layout(
+                    height=300,
+                    margin=dict(l=20, r=20, t=10, b=20),
+                    yaxis_title="아웃풋 갭 (%)",
+                    hovermode="x unified"
+                )
+                st.plotly_chart(fig_gap, use_container_width=True)
+            else:
+                st.error("아웃풋 갭 데이터를 표시할 수 없습니다.")
+                
+        with trend_col2:
+            st.markdown("#### 2. 경제의 추세: 생산성 향상 (Productivity)")
+            st.write("동일한 노동력과 비용을 투입해 더 많은 산출물을 생산하는 기업의 본질적 능력입니다.")
+            st.write("- **장기 우상향 추세**: 기업의 마진 개선과 물가 안정의 유일한 **'횡재'** 요인.")
+            st.write("- 생산성이 장기적으로 성장하는 국가(예: 미국)에 투자해야 장기 복리 혜택을 누릴 수 있습니다.")
+            
+            if not us_prod.empty:
+                fig_prod = go.Figure()
+                fig_prod.add_trace(go.Scatter(
+                    x=us_prod.index,
+                    y=us_prod,
+                    mode='lines',
+                    name='Productivity Index',
+                    line=dict(color='#50E3C2', width=3)
+                ))
+                fig_prod.update_layout(
+                    height=300,
+                    margin=dict(l=20, r=20, t=10, b=20),
+                    yaxis_title="생산성 지수 (2017=100)",
+                    hovermode="x unified"
+                )
+                st.plotly_chart(fig_prod, use_container_width=True)
+            else:
+                st.error("생산성 데이터를 표시할 수 없습니다.")
+                
+        st.markdown("---")
+        
+        # 3. 한/미 기준금리 및 장단기 금리차
+        st.subheader("💵 2단계: 금리 정책과 장단기 금리차 (경기 선행 지표)")
+        st.markdown("금리는 돈의 가격이자 경제의 온도를 나타냅니다. 통화 정책과 채권 시장의 스프레드는 미래 경기를 앞서 보여줍니다.")
+        
+        rate_col1, rate_col2 = st.columns(2)
+        
+        with rate_col1:
+            st.markdown("#### 1. 한/미 기준금리 추이")
+            st.write("각국 중앙은행(Fed, BOK)의 공식 정책금리입니다. 자산 가격의 할인율 및 자금 조달 비용을 결정합니다.")
+            
+            if not us_base.empty and not kr_base.empty:
+                df_base = pd.DataFrame({'US_Base': us_base, 'KR_Base': kr_base}).ffill().dropna()
+                fig_base = go.Figure()
+                fig_base.add_trace(go.Scatter(x=df_base.index, y=df_base['US_Base'], name='미국 기준금리', line=dict(color='#FFBF00', width=2.5)))
+                fig_base.add_trace(go.Scatter(x=df_base.index, y=df_base['KR_Base'], name='한국 기준금리', line=dict(color='#4A90E2', width=2.5)))
+                fig_base.update_layout(
+                    height=300,
+                    margin=dict(l=20, r=20, t=10, b=20),
+                    yaxis_title="금리 (%)",
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                    hovermode="x unified"
+                )
+                st.plotly_chart(fig_base, use_container_width=True)
+            else:
+                st.error("기준금리 데이터를 표시할 수 없습니다.")
+                
+        with rate_col2:
+            st.markdown("#### 2. 미국 장단기 금리차 (10Y - 2Y)")
+            st.write("장기 성장률 전망(10년물)과 단기 통화 정책(2년물)의 격차입니다.")
+            st.write("- **장단기 역전(스프레드 < 0)**: 역사상 경기 침체(Recession)를 유발했던 가장 확실한 선행 지표.")
+            st.write("- 금리차가 다시 정상화(0 이상으로 반등)되는 시점부터 경기 침체가 가시화되므로 주의가 필요합니다.")
+            
+            if not us_10y.empty and not us_2y.empty:
+                df_spread = pd.DataFrame({'US_10Y': us_10y, 'US_2Y': us_2y}).ffill().dropna()
+                df_spread['Spread'] = df_spread['US_10Y'] - df_spread['US_2Y']
+                
+                fig_spread = go.Figure()
+                fig_spread.add_trace(go.Scatter(
+                    x=df_spread.index, y=df_spread['Spread'],
+                    fill='tozeroy',
+                    name='10Y - 2Y Spread',
+                    line=dict(color='#9013FE', width=2)
+                ))
+                fig_spread.add_hline(y=0.0, line_dash="dash", line_color="black")
+                fig_spread.update_layout(
+                    height=300,
+                    margin=dict(l=20, r=20, t=10, b=20),
+                    yaxis_title="금리차 (%p)",
+                    hovermode="x unified"
+                )
+                st.plotly_chart(fig_spread, use_container_width=True)
+            else:
+                st.error("장단기 금리차 데이터를 표시할 수 없습니다.")
+                
+        st.markdown("---")
+        
+        # 4. 환율 추이
+        st.subheader("💱 3단계: 글로벌 통화 및 환율 (자금 흐름의 척도)")
+        st.markdown("원/달러 환율은 위험자산과 안전자산 간의 글로벌 자금 선호도를 보여주는 심리지표입니다.")
+        
+        fx_col1, fx_col2 = st.columns([2, 1])
+        with fx_col1:
+            if not usd_krw.empty:
+                fig_fx = go.Figure()
+                fig_fx.add_trace(go.Scatter(
+                    x=usd_krw.index, y=usd_krw,
+                    name='USD/KRW',
+                    line=dict(color='#8B572A', width=2)
+                ))
+                fig_fx.update_layout(
+                    height=300,
+                    margin=dict(l=20, r=20, t=10, b=20),
+                    yaxis_title="원/달러 환율 (원)",
+                    hovermode="x unified"
+                )
+                st.plotly_chart(fig_fx, use_container_width=True)
+            else:
+                st.error("환율 데이터를 표시할 수 없습니다.")
+                
+        with fx_col2:
+            st.markdown("#### 원/달러 환율의 매크로 해석")
+            st.write("- **환율 상승 (원화 약세 / 달러 강세)**")
+            st.write("  - 글로벌 위험 기피 심리가 고조될 때 상승합니다.")
+            st.write("  - 한국 주식 시장(KOSPI)에서 외국인 수급 이탈을 자극하는 요인이 됩니다.")
+            st.write("- **환율 하락 (원화 강세 / 달러 약세)**")
+            st.write("  - 글로벌 위험 선호(경기 호황) 국면에서 자금이 한국 등 신흥국으로 유입될 때 하락합니다.")
+            st.write("  - 국내 주식 비중을 늘리기 좋은 거시경제 환경을 조성합니다.")
+            
+        st.info("💡 **매크로 대시보드 투자 활용법:**\n"
+                "1. **추세 확인**: 생산성 그래프(우상향)를 보고 장기 투자 대상 국가의 경쟁력을 확인하세요.\n"
+                "2. **순환 분석**: 아웃풋 갭이 마이너스(-)일 때 정부/중앙은행의 부양책에 힘입어 주가가 바닥을 다질 가능성이 높으므로 분할 매수 기회로 삼으세요. 반대로 플러스(+) 영역이 깊어지면 과열을 주의해야 합니다.\n"
+                "3. **위험 관리**: 미국 장단기 금리 역전 현상이 심해진 이후 환율이 급등하는 구간이 오면 안전 자산(금, 달러 예금)의 비중을 높여 변동성에 대비하세요.")
+    else:
+        st.error("매크로 데이터를 가져올 수 없었습니다.")
