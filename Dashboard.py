@@ -922,11 +922,20 @@ elif page == "🇰🇷 한국 주식 (KOSPI)":
         val_df = load_valuation_data() # 이전에 만든 밸류에이션 함수 호출
         
         if not val_df.empty:
+            # 표와 차트 보기 옵션 추가
+            view_type = st.radio("보기 방식 선택", ["표 (Table)", "차트 (Chart)"], horizontal=True, key="kospi_val_view")
+            
             v_tab1, v_tab2 = st.tabs(["📊 PER (주가수익비율) 추이", "📊 PBR (주가순자산비율) 추이"])
             with v_tab1:
-                st.dataframe(val_df[["KOSPI 전체 PER", "대형주 PER", "중형주 PER", "소형주 PER"]].style.format("{:.2f} x").background_gradient(cmap='YlOrRd', axis=0), use_container_width=True)
+                if view_type == "표 (Table)":
+                    st.dataframe(val_df[["KOSPI 전체 PER", "대형주 PER", "중형주 PER", "소형주 PER"]].style.format("{:.2f} x").background_gradient(cmap='YlOrRd', axis=0), use_container_width=True)
+                else:
+                    st.line_chart(val_df[["KOSPI 전체 PER", "대형주 PER", "중형주 PER", "소형주 PER"]], height=350)
             with v_tab2:
-                st.dataframe(val_df[["KOSPI 전체 PBR", "대형주 PBR", "중형주 PBR", "소형주 PBR"]].style.format("{:.2f} x").background_gradient(cmap='Blues', axis=0), use_container_width=True)
+                if view_type == "표 (Table)":
+                    st.dataframe(val_df[["KOSPI 전체 PBR", "대형주 PBR", "중형주 PBR", "소형주 PBR"]].style.format("{:.2f} x").background_gradient(cmap='Blues', axis=0), use_container_width=True)
+                else:
+                    st.line_chart(val_df[["KOSPI 전체 PBR", "대형주 PBR", "중형주 PBR", "소형주 PBR"]], height=350)
         else:
             st.info("밸류에이션 데이터를 불러오는 중입니다...")
 
