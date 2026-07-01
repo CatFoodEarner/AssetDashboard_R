@@ -58,6 +58,95 @@ def load_gold_seasonality_data():
         st.error(f"금 계절성 데이터 로드 실패: {e}")
         return pd.DataFrame()
 
+def calculate_gold_seasonal_stats(df):
+    if df.empty:
+        return pd.DataFrame()
+        
+    def get_phase(yr):
+        if 1970 <= yr <= 1980: return '상승장'
+        elif 1981 <= yr <= 2000: return '하락장'
+        elif 2001 <= yr <= 2011: return '상승장'
+        elif 2012 <= yr <= 2018: return '하락장'
+        elif 2019 <= yr <= 2026: return '상승장'
+        return '기타'
+        
+    records = []
+    years = sorted(list(df['Year'].unique()))
+    for y in years:
+        price_apr = df[(df['Year'] == y) & (df['Month'] == 4)]
+        price_oct = df[(df['Year'] == y) & (df['Month'] == 10)]
+        ret_5_10 = None
+        if not price_apr.empty and not price_oct.empty:
+            ret_5_10 = (price_oct['Price'].values[0] / price_apr['Price'].values[0] - 1) * 100
+            
+        price_oct_current = df[(df['Year'] == y) & (df['Month'] == 10)]
+        price_apr_next = df[(df['Year'] == y + 1) & (df['Month'] == 4)]
+        ret_11_4 = None
+        if not price_oct_current.empty and not price_apr_next.empty:
+            ret_11_4 = (price_apr_next['Price'].values[0] / price_oct_current['Price'].values[0] - 1) * 100
+            
+        phase = get_phase(y)
+        decade = f"{(y // 10) * 10}s"
+        
+        records.append({
+            'Year': y,
+            'Decade': decade,
+            'Phase': phase,
+            'Ret_5_10': ret_5_10,
+            'Ret_11_4': ret_11_4
+        })
+        
+    res_df = pd.DataFrame(records).dropna(subset=['Ret_5_10', 'Ret_11_4'], how='all')
+    if res_df.empty:
+        return pd.DataFrame()
+        
+    summary_rows = []
+    
+    # 1. 전체 평균
+    summary_rows.append({
+        '구분': '전체 평균 (1970~현재)',
+        '국면': '-',
+        '11월~4월 (동절기)': res_df['Ret_11_4'].mean(),
+        '5월~10월 (하절기)': res_df['Ret_5_10'].mean()
+    })
+    
+    # 2. 상승장 평균
+    bull_df = res_df[res_df['Phase'] == '상승장']
+    summary_rows.append({
+        '구분': '상승장 평균',
+        '국면': '상승장',
+        '11월~4월 (동절기)': bull_df['Ret_11_4'].mean(),
+        '5월~10월 (하절기)': bull_df['Ret_5_10'].mean()
+    })
+    
+    # 3. 하락장 평균
+    bear_df = res_df[res_df['Phase'] == '하락장']
+    summary_rows.append({
+        '구분': '하락장 평균',
+        '국면': '하락장',
+        '11월~4월 (동절기)': bear_df['Ret_11_4'].mean(),
+        '5월~10월 (하절기)': bear_df['Ret_5_10'].mean()
+    })
+    
+    # 4. 10년 단위별 평균
+    decades = sorted(list(res_df['Decade'].unique()))
+    for dec in decades:
+        dec_df = res_df[res_df['Decade'] == dec]
+        rep_phase = dec_df['Phase'].mode()[0] if not dec_df['Phase'].empty else '-'
+        # 2010년대의 경우 2019년이 상승장에 걸쳐 있으나 전체적으로는 하락장이 우세하므로 직관적인 명시 조정
+        if dec == '2010s':
+            rep_phase = '하락장'
+        summary_rows.append({
+            '구분': f"{dec[:-1]}년대 평균",
+            '국면': rep_phase,
+            '11월~4월 (동절기)': dec_df['Ret_11_4'].mean(),
+            '5월~10월 (하절기)': dec_df['Ret_5_10'].mean()
+        })
+        
+    summary_df = pd.DataFrame(summary_rows)
+    summary_df['성과 차이 (동절기 - 하절기)'] = summary_df['11월~4월 (동절기)'] - summary_df['5월~10월 (하절기)']
+    return summary_df
+
 # =================@st.cache_data(ttl=3600)
 def load_macro_data():
     import time
@@ -964,6 +1053,71 @@ if page == "🪙 금 (Gold)":
             st.dataframe(styled_recent, use_container_width=True)
         else:
             st.info("최근 3개년 등락률 데이터를 구성할 수 없습니다.")
+
+        # 3. 6개월 주기별 등락률 비교 (11월~4월 vs 5월~10월)
+        st.subheader("🗓️ 금 6개월 주기별 등락률 비교 (11월~4월 vs 5월~10월)")
+        st.markdown(
+            "금 시장의 유명한 계절성 법칙인 **동절기 강세(11월~다음해 4월)**와 **하절기 약세(5월~10월)** 효과를 분석합니다. "
+            "스프레드가 플러스(+)일 경우 동절기 매수 전략이 하절기 매수 전략보다 우수했음을 나타냅니다."
+        )
+        
+        seasonal_stats = calculate_gold_seasonal_stats(seasonality_df)
+        if not seasonal_stats.empty:
+            styled_seasonal_stats = (
+                seasonal_stats.style
+                .format({
+                    '11월~4월 (동절기)': '{:+.2f}%',
+                    '5월~10월 (하절기)': '{:+.2f}%',
+                    '성과 차이 (동절기 - 하절기)': '{:+.2f}%'
+                })
+                .background_gradient(cmap='coolwarm', subset=['11월~4월 (동절기)', '5월~10월 (하절기)', '성과 차이 (동절기 - 하절기)'], vmin=-10.0, vmax=10.0)
+            )
+            st.dataframe(styled_seasonal_stats, use_container_width=True)
+        else:
+            st.info("주기별 비교 통계를 계산할 수 없습니다.")
+            
+        # 4. 각 10년 단위의 경제적 배경 및 금 시장 특징 설명판
+        st.subheader("📚 역사적인 10년 단위별 경제적 배경 및 금 국면 요약")
+        st.markdown("1970년대부터 현재까지 금 가격을 움직인 핵심 거시경제적 배경과 시장 국면(상승장/하락장)을 요약합니다.")
+        
+        decades_info = {
+            "1970년대 (상승장 - Secular Bull)": (
+                "**핵심 배경**: 브레턴우즈 체제 붕괴(미국 달러의 금 태환 정지)와 1, 2차 오일 쇼크로 인한 만성적인 스태그플레이션 도래.\n\n"
+                "**금 시장 영향**: 화폐 가치에 대한 불신과 살인적인 인플레이션 속에서 강력한 헤지 자산으로 부각되며, 금 가격이 온스당 $35에서 장중 $850까지 약 24배 폭등하며 역사적인 1차 대세 상승장을 기록했습니다."
+            ),
+            "1980년대 (하락장 - Secular Bear)": (
+                "**핵심 배경**: 미 연준 의장 폴 볼커의 초고금리 긴축 정책(기준금리 최고 20%대 돌입)으로 물가 급등 제압 성공.\n\n"
+                "**금 시장 영향**: 고금리로 인해 무이자의 안전자산인 금의 매력이 급락했고, 인플레이션이 빠르게 둔화하면서 긴 하락 추세(장기 조정기)에 진입하였습니다."
+            ),
+            "1990년대 (하락장 - Secular Bear)": (
+                "**핵심 배경**: 냉전 종식, 미국 경제의 신경제(IT 혁명) 도래로 생산성 향상과 주식 시장의 폭발적인 대세 상승기.\n\n"
+                "**금 시장 영향**: 투자 자산으로서 금의 존재감이 극도로 축소되며 '금의 암흑기'가 지속되었고, 온스당 $250선까지 가격이 주저앉았습니다."
+            ),
+            "2000년대 (상승장 - Secular Bull)": (
+                "**핵심 배경**: IT 버블 붕괴, 9/11 테러, 글로벌 금융위기 발발 및 미 연준의 초저금리 및 양적완화(QE) 유동성 공급.\n\n"
+                "**금 시장 영향**: 달러 가치 급락, 인플레이션 우려, 원자재 슈퍼사이클이 겹치며 안전자산 선호가 극대화되었습니다. 2011년 온스당 $1,900선까지 치솟으며 2차 대세 상승장을 완성했습니다."
+            ),
+            "2010년대 (하락장 - Secular Bear)": (
+                "**핵심 배경**: 글로벌 금융위기 극복 이후 미 연준의 자산 매입 축소(테이퍼링)와 본격적인 금리 인상기 돌입.\n\n"
+                "**금 시장 영향**: 미국 중심의 경기 회복과 달러 강세로 인해 금 가격은 2015년 온스당 $1,050선까지 급락하는 혹독한 조정기를 거쳤습니다. (단, 2019년부터 미-중 무역 분쟁 및 금리 인하 기대감으로 재상승 국면에 진입)"
+            ),
+            "2020년대 (상승장 - Secular Bull)": (
+                "**핵심 배경**: 코로나19 팬데믹 극복을 위한 글로벌 유동성 대방출, 역사적인 고인플레이션 재발, 지정학적 리스크(러-우 전쟁, 중동 분쟁) 심화 및 글로벌 중앙은행들의 역대급 금 매수세.\n\n"
+                "**금 시장 영향**: 인플레이션 헤지 수요와 달러 패권에 대응하려는 중앙은행들의 실물 금 매입이 몰리면서, 연일 사상 최고치를 경신하며 강력한 3차 대세 상승장을 이어가고 있습니다."
+            )
+        }
+        
+        exp_col1, exp_col2 = st.columns(2)
+        dec_keys = list(decades_info.keys())
+        
+        with exp_col1:
+            for title in dec_keys[:3]:
+                with st.expander(f"📖 {title}"):
+                    st.write(decades_info[title])
+        with exp_col2:
+            for title in dec_keys[3:]:
+                with st.expander(f"📖 {title}"):
+                    st.write(decades_info[title])
     else:
         st.info("금 계절성 데이터를 불러올 수 없습니다.")
 
