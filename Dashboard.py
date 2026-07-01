@@ -40,6 +40,24 @@ def load_gold_data():
             if attempt < max_retries - 1: time.sleep(3)
             else: return pd.DataFrame()
 
+@st.cache_data(ttl=86400)
+def load_gold_seasonality_data():
+    try:
+        url = "https://raw.githubusercontent.com/datasets/gold-prices/master/data/monthly.csv"
+        df = pd.read_csv(url)
+        df['Date'] = pd.to_datetime(df['Date'])
+        df = df.sort_values('Date').reset_index(drop=True)
+        df['Monthly_Return'] = df['Price'].pct_change() * 100
+        df = df[df['Date'] >= '1970-01-01'].copy()
+        df['Year'] = df['Date'].dt.year
+        df['Month'] = df['Date'].dt.month
+        df['Decade'] = (df['Year'] // 10) * 10
+        df['Decade_Str'] = df['Decade'].astype(str) + 's'
+        return df
+    except Exception as e:
+        st.error(f"금 계절성 데이터 로드 실패: {e}")
+        return pd.DataFrame()
+
 # =================@st.cache_data(ttl=3600)
 def load_macro_data():
     import time
@@ -896,6 +914,58 @@ if page == "🪙 금 (Gold)":
             fig2.update_yaxes(title_text="유동성(M2) 증감률 YoY (%)", showgrid=False, secondary_y=True)
 
             st.plotly_chart(fig2, use_container_width=True)
+
+    # ---------------------------------------------
+    # 금 계절성 분석 섹션 (1970년 ~ 현재)
+    # ---------------------------------------------
+    st.markdown("---")
+    st.subheader("📅 역사적 금 가격 월별 계절성 (1970 ~ 현재)")
+    st.markdown("1970년대부터 현재까지 각 10년 단위(Decade)별 월평균 등락률(%)을 나타냅니다. 역사적인 월별 상승/하락 패턴을 파악할 수 있습니다.")
+
+    seasonality_df = load_gold_seasonality_data()
+    if not seasonality_df.empty:
+        # 1. 10년 단위 계절성 피벗 테이블 계산
+        seasonality = seasonality_df.groupby(['Decade_Str', 'Month'])['Monthly_Return'].mean().reset_index()
+        pivot_seasonality = seasonality.pivot(index='Decade_Str', columns='Month', values='Monthly_Return')
+        pivot_seasonality.columns = [f"{m:02d}월" for m in pivot_seasonality.columns]
+        
+        # 10년 단위 정렬
+        decades_order = sorted(list(pivot_seasonality.index))
+        pivot_seasonality = pivot_seasonality.reindex(decades_order)
+        
+        # 스타일링 적용 (붉은색/파란색 그라디언트)
+        styled_seasonality = pivot_seasonality.style.format("{:+.2f}%").background_gradient(cmap='coolwarm', axis=None, vmin=-3.0, vmax=3.0)
+        st.dataframe(styled_seasonality, use_container_width=True)
+        
+        # 2. 최근 3년 월별 등락률 테이블
+        st.subheader("📆 최근 3개년 월별 등락률 (%)")
+        st.markdown("최근 3년 동안의 구체적인 월간 등락률 흐름을 비교하여, 최근 금 가격이 역사적인 계절성 경로를 따르고 있는지 확인할 수 있습니다.")
+        
+        current_year = datetime.datetime.now().year
+        # 최근 3개년 (현재 연도 포함, 예: 2024, 2025, 2026)
+        recent_df = seasonality_df[seasonality_df['Year'] >= (current_year - 2)].copy()
+        
+        if not recent_df.empty:
+            pivot_recent = recent_df.pivot(index='Year', columns='Month', values='Monthly_Return')
+            # 월 컬럼 포맷팅
+            pivot_recent.columns = [f"{m:02d}월" for m in pivot_recent.columns]
+            
+            # 누락된 월 컬럼이 있을 수 있으므로 (예: 현재 연도의 하반기), 01월~12월 컬럼을 모두 보장
+            all_months = [f"{m:02d}월" for m in range(1, 13)]
+            for col in all_months:
+                if col not in pivot_recent.columns:
+                    pivot_recent[col] = float('nan')
+            pivot_recent = pivot_recent[all_months]
+            
+            # 연도 역순 정렬 (최신 연도가 위로 가도록)
+            pivot_recent = pivot_recent.sort_index(ascending=False)
+            
+            styled_recent = pivot_recent.style.format("{:+.2f}%", na_rep="-").background_gradient(cmap='coolwarm', axis=None, vmin=-5.0, vmax=5.0)
+            st.dataframe(styled_recent, use_container_width=True)
+        else:
+            st.info("최근 3개년 등락률 데이터를 구성할 수 없습니다.")
+    else:
+        st.info("금 계절성 데이터를 불러올 수 없습니다.")
 
 elif page == "🇰🇷 한국 주식 (KOSPI)":
     # (한국 주식 코드는 기존 그대로 유지합니다)
