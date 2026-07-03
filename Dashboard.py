@@ -58,6 +58,39 @@ def load_gold_seasonality_data():
         st.error(f"금 계절성 데이터 로드 실패: {e}")
         return pd.DataFrame()
 
+@st.cache_data(ttl=21600)
+def load_gold_advanced_data():
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            tickers = ["GC=F", "SI=F", "HG=F", "GDX", "JPY=X", "EUR=X", "CNY=X", "KRW=X"]
+            data = {}
+            for t in tickers:
+                history = yf.Ticker(t).history(period="10y")['Close']
+                if history.empty:
+                    raise ValueError(f"Ticker {t} returned empty data")
+                history.index = pd.to_datetime(history.index).tz_localize(None).normalize()
+                data[t] = history
+            
+            df = pd.DataFrame(data).ffill().dropna()
+            df = df.rename(columns={
+                'GC=F': 'Gold',
+                'SI=F': 'Silver',
+                'HG=F': 'Copper',
+                'GDX': 'Miners',
+                'JPY=X': 'USD_JPY',
+                'EUR=X': 'USD_EUR',
+                'CNY=X': 'USD_CNY',
+                'KRW=X': 'USD_KRW'
+            })
+            return df
+        except Exception as e:
+            if attempt < max_retries - 1:
+                import time
+                time.sleep(3)
+            else:
+                return pd.DataFrame()
+
 def calculate_gold_seasonal_stats(df):
     if df.empty:
         return pd.DataFrame()
@@ -1120,6 +1153,292 @@ if page == "🪙 금 (Gold)":
                     st.write(decades_info[title])
     else:
         st.info("금 계절성 데이터를 불러올 수 없습니다.")
+
+    # ---------------------------------------------
+    # 5. 금 심층 분석 & 기술적 시그널 (Advanced Analysis)
+    # ---------------------------------------------
+    import numpy as np
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
+    st.markdown("---")
+    st.subheader("🔍 금 심층 분석 & 기술적 시그널 (Advanced Quantitative Signals)")
+    st.markdown(
+        "금 시장의 구조적 강세 여부를 모니터링하기 위한 이평선 정배열 추세 스코어, 금광주 상대가치 스프레드, "
+        "금/은 비율의 과열 탐욕 시그널, 경기 침체 선행 지표인 금/구리 비율, 그리고 글로벌 통화별 상승률을 입체적으로 분석합니다."
+    )
+
+    adv_df = load_gold_advanced_data()
+    if not adv_df.empty:
+        tab_tech1, tab_tech2, tab_tech3 = st.tabs([
+            "📈 추세 & 금광주 스프레드", 
+            "⚖️ 금/은 (GSR) & 금/구리 (GCR)", 
+            "🌎 글로벌 통화 & 실질금리 디커플링"
+        ])
+        
+        with tab_tech1:
+            # 1. 이평선 추세 점수 (SMA 20, 50, 100, 200)
+            adv_df['SMA_20'] = adv_df['Gold'].rolling(20).mean()
+            adv_df['SMA_50'] = adv_df['Gold'].rolling(50).mean()
+            adv_df['SMA_100'] = adv_df['Gold'].rolling(100).mean()
+            adv_df['SMA_200'] = adv_df['Gold'].rolling(200).mean()
+            
+            # Trend score logic
+            score = np.zeros(len(adv_df))
+            score += np.where(adv_df['SMA_20'] > adv_df['SMA_50'], 30, 0)
+            score += np.where(adv_df['SMA_50'] > adv_df['SMA_100'], 30, 0)
+            score += np.where(adv_df['SMA_100'] > adv_df['SMA_200'], 40, 0)
+            adv_df['Trend_Score'] = score
+            
+            latest_score = adv_df['Trend_Score'].iloc[-1]
+            latest_gold = adv_df['Gold'].iloc[-1]
+            
+            # Display Alert & Metric
+            tc1, tc2 = st.columns([1, 2])
+            with tc1:
+                st.metric("금 가격 추세 강도 점수", f"{latest_score:.0f} / 100")
+                if latest_score == 100:
+                    st.success("🟢 완전 정배열 (최상급 상승 추세)")
+                elif latest_score >= 60:
+                    st.info("🟡 상승 유지 (단기 숨고르기 국면)")
+                elif latest_score >= 30:
+                    st.warning("🟠 추세 약화 (박스권 및 조정 국면)")
+                else:
+                    st.error("🔴 추세 하락 (중장기 하락 국면 진입)")
+            
+            with tc2:
+                # 역배열 경고 여부 체크
+                is_reverse = (
+                    adv_df['SMA_20'].iloc[-1] < adv_df['SMA_50'].iloc[-1] < 
+                    adv_df['SMA_100'].iloc[-1] < adv_df['SMA_200'].iloc[-1]
+                )
+                if is_reverse or (latest_gold < adv_df['SMA_200'].iloc[-1] and latest_score == 0):
+                    st.error(
+                        "⚠️ **추세 위험 경고: 이평선 완전 역배열 진입**\n\n"
+                        "단/중/장기 이평선이 완전히 역배열되어 장기 상승 추세가 훼손되었을 가능성이 큽니다. "
+                        "기계적 리스크 관리를 검토하십시오."
+                    )
+                else:
+                    st.success(
+                        "✅ **추세 건전성 양호**\n\n"
+                        "이평선이 완전 역배열 상태가 아니므로 구조적 장기 우상향 궤도가 훼손되지 않은 상태입니다."
+                    )
+                    
+            # 이평선 차트 그리기
+            fig_sma = go.Figure()
+            fig_sma.add_trace(go.Scatter(x=adv_df.index[-500:], y=adv_df['Gold'].iloc[-500:], name="금 현물 (Gold)", line=dict(color="#FFD700", width=2)))
+            fig_sma.add_trace(go.Scatter(x=adv_df.index[-500:], y=adv_df['SMA_20'].iloc[-500:], name="20 SMA", line=dict(color="#FF4B4B", width=1.2, dash="dash")))
+            fig_sma.add_trace(go.Scatter(x=adv_df.index[-500:], y=adv_df['SMA_50'].iloc[-500:], name="50 SMA", line=dict(color="#FFA15A", width=1.2)))
+            fig_sma.add_trace(go.Scatter(x=adv_df.index[-500:], y=adv_df['SMA_100'].iloc[-500:], name="100 SMA", line=dict(color="#19D3F3", width=1.2)))
+            fig_sma.add_trace(go.Scatter(x=adv_df.index[-500:], y=adv_df['SMA_200'].iloc[-500:], name="200 SMA", line=dict(color="#00CC96", width=1.5)))
+            fig_sma.update_layout(height=350, margin=dict(l=10, r=10, t=10, b=10), hovermode="x unified", legend=dict(orientation="h", y=1.1))
+            st.plotly_chart(fig_sma, use_container_width=True)
+            
+            st.markdown("---")
+            
+            # 2. 금 현물 vs 금광주 스프레드 (GDX/Gold)
+            st.markdown("##### ⛏️ 금 현물 vs 금광주(GDX) 밸류에이션 스프레드")
+            st.markdown(
+                "금 가격 대비 금광주 지수(GDX)의 비율을 추적하여 광산 기업들의 저평가 강도를 분석합니다. "
+                "스프레드 비율이 볼린저 밴드 하단(-2 표준편차)에 도달하면 금광주가 역사적으로 극도 저평가되어 알파 수익 기회가 있음을 의미합니다."
+            )
+            
+            adv_df['Miners_Ratio'] = adv_df['Miners'] / adv_df['Gold']
+            adv_df['Miners_Mean'] = adv_df['Miners_Ratio'].rolling(252).mean()
+            adv_df['Miners_Std'] = adv_df['Miners_Ratio'].rolling(252).std()
+            adv_df['Miners_Upper'] = adv_df['Miners_Mean'] + 2 * adv_df['Miners_Std']
+            adv_df['Miners_Lower'] = adv_df['Miners_Mean'] - 2 * adv_df['Miners_Std']
+            adv_df['Miners_Z'] = (adv_df['Miners_Ratio'] - adv_df['Miners_Mean']) / adv_df['Miners_Std']
+            
+            latest_z = adv_df['Miners_Z'].iloc[-1]
+            latest_ratio = adv_df['Miners_Ratio'].iloc[-1]
+            
+            if latest_z <= -2.0:
+                st.success(
+                    f"🟢 **금광주 극도 저평가 알림 (Z-Score: {latest_z:.2f})**\n\n"
+                    "금광주/현물 비율이 역사적 밴드 하단(-2.00σ 이하)에 도달했습니다. "
+                    "금광 기업들의 이익 마진 스프레드 대비 주가가 현물 대비 지나치게 저렴하므로 금광주 분할 매수 진입 시점(알파 수익 창출)으로 적합합니다."
+                )
+            elif latest_z >= 2.0:
+                st.warning(
+                    f"🟡 **금광주 상대적 고평가 경고 (Z-Score: {latest_z:.2f})**\n\n"
+                    "금광주/현물 비율이 밴드 상단(+2.00σ 이상)에 도달했습니다. 금광주 비중을 축소하고 실물 금으로 스위칭을 고려해볼 만합니다."
+                )
+            else:
+                st.info(f"ℹ️ **현재 금광주 밸류에이션 스프레드**: 정상 범위 내 (Z-Score: {latest_z:.2f})")
+                
+            fig_ratio = go.Figure()
+            fig_ratio.add_trace(go.Scatter(x=adv_df.index[-500:], y=adv_df['Miners_Ratio'].iloc[-500:], name="금광주/금 비율", line=dict(color="#AB63FA", width=2)))
+            fig_ratio.add_trace(go.Scatter(x=adv_df.index[-500:], y=adv_df['Miners_Mean'].iloc[-500:], name="252일 평균선", line=dict(color="#CCCCCC", dash="dot")))
+            fig_ratio.add_trace(go.Scatter(x=adv_df.index[-500:], y=adv_df['Miners_Upper'].iloc[-500:], name="밴드 상단 (+2σ)", line=dict(color="#EF553B", width=1, dash="dash")))
+            fig_ratio.add_trace(go.Scatter(x=adv_df.index[-500:], y=adv_df['Miners_Lower'].iloc[-500:], name="밴드 하단 (-2σ)", line=dict(color="#00CC96", width=1, dash="dash")))
+            fig_ratio.update_layout(height=350, margin=dict(l=10, r=10, t=10, b=10), hovermode="x unified", legend=dict(orientation="h", y=1.1))
+            st.plotly_chart(fig_ratio, use_container_width=True)
+            
+        with tab_tech2:
+            # 3. 금/은 교환 비율 (GSR) 및 은 RSI 탐욕 시그널
+            st.markdown("##### ⚖️ 금/은 교환 비율(Gold/Silver Ratio) & 은 RSI 과열 지표")
+            st.markdown(
+                "금/은 비율(GSR)은 귀금속 시장의 '공포(금)'와 '탐욕(은)'의 강도를 보여줍니다. "
+                "은 가격이 랠리의 후반부에 폭발적으로 급등하여 은 RSI가 극단적인 과매수(75 이상) 영역에 진입하고 "
+                "GSR이 동반 하락하는 국면은 역사적으로 전체 귀금속 상승 랠리의 **단기 고점(Euphoria Peak)** 신호로 작용해왔습니다."
+            )
+            
+            adv_df['GSR'] = adv_df['Gold'] / adv_df['Silver']
+            
+            # Silver RSI 14
+            delta = adv_df['Silver'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / (loss + 1e-10)
+            adv_df['Silver_RSI'] = 100 - (100 / (1 + rs))
+            
+            latest_gsr = adv_df['GSR'].iloc[-1]
+            latest_silver_rsi = adv_df['Silver_RSI'].iloc[-1]
+            
+            col_gsr1, col_gsr2 = st.columns(2)
+            with col_gsr1:
+                st.metric("현재 금/은 비율 (GSR)", f"{latest_gsr:.2f} 배")
+            with col_gsr2:
+                st.metric("현재 은(Silver) RSI (14일)", f"{latest_silver_rsi:.1f}")
+                
+            if latest_silver_rsi > 75.0:
+                st.error(
+                    f"🚨 **귀금속 단기 탐욕(Euphoria) 시그널 감지**\n\n"
+                    f"은의 14일 RSI가 {latest_silver_rsi:.1f}로 과매수 위험선(75)을 초과했습니다. "
+                    "은 가격의 하이퍼볼릭한 급등에 따른 랠리 후반부 과열 신호일 수 있으므로 비중 일부 축소 또는 분할 이익 실현을 고려하십시오."
+                )
+            else:
+                st.success("✅ **은 변동성 안정 국면**: 은 가격이 비정상적인 탐욕 오버슈팅 국면이 아닙니다.")
+                
+            fig_gsr = make_subplots(specs=[[{"secondary_y": True}]])
+            fig_gsr.add_trace(
+                go.Scatter(x=adv_df.index[-500:], y=adv_df['GSR'].iloc[-500:], name="금/은 비율 (GSR)", line=dict(color="#FFD700", width=2)),
+                secondary_y=False
+            )
+            fig_gsr.add_trace(
+                go.Scatter(x=adv_df.index[-500:], y=adv_df['Silver_RSI'].iloc[-500:], name="은 RSI (14)", line=dict(color="#636EFA", width=1.2, dash="dot")),
+                secondary_y=True
+            )
+            fig_gsr.update_layout(height=350, margin=dict(l=10, r=10, t=10, b=10), hovermode="x unified", legend=dict(orientation="h", y=1.1))
+            fig_gsr.update_yaxes(title_text="GSR 배수", secondary_y=False)
+            fig_gsr.update_yaxes(title_text="은 RSI", range=[10, 90], secondary_y=True)
+            st.plotly_chart(fig_gsr, use_container_width=True)
+            
+            st.markdown("---")
+            
+            # 4. 금/구리 비율 (GCR)
+            st.markdown("##### 🐂 금/구리 비율 (Gold-to-Copper Ratio) - 매크로 경기 선행 지표")
+            st.markdown(
+                "안전자산인 금과 대표적 경기 민감 산업 금속인 구리의 가격 비율(GCR)입니다. "
+                "이 비율이 상승하면 글로벌 경기 침체, 불황 우려, 스태그플레이션 리스크가 커지고 있음을 뜻하며(금 우세), "
+                "이 비율이 하락하면 전 세계 제조업 경기 회복 및 인프라 성장이 시작되고 있음을 보여줍니다(구리 우세)."
+            )
+            
+            adv_df['GCR'] = adv_df['Gold'] / adv_df['Copper']
+            adv_df['GCR_120'] = adv_df['GCR'].rolling(120).mean()
+            latest_gcr = adv_df['GCR'].iloc[-1]
+            
+            st.metric("현재 금/구리 비율 (GCR)", f"{latest_gcr:.1f} 배")
+            
+            fig_gcr = go.Figure()
+            fig_gcr.add_trace(go.Scatter(x=adv_df.index[-500:], y=adv_df['GCR'].iloc[-500:], name="금/구리 비율 (GCR)", line=dict(color="#EF553B", width=2)))
+            fig_gcr.add_trace(go.Scatter(x=adv_df.index[-500:], y=adv_df['GCR_120'].iloc[-500:], name="120일 평균선", line=dict(color="#19D3F3", dash="dash")))
+            fig_gcr.update_layout(height=350, margin=dict(l=10, r=10, t=10, b=10), hovermode="x unified", legend=dict(orientation="h", y=1.1))
+            st.plotly_chart(fig_gcr, use_container_width=True)
+            
+        with tab_tech3:
+            # 5. 글로벌 다국적 통화별 금 가격 상승률
+            st.markdown("##### 🌎 주요국 통화 기준 금 가격 누적 수익률 비교 (3개년)")
+            st.markdown(
+                "금 가격의 3년 전 기준 누적 수익률을 각국 화폐(달러, 유로, 엔, 위안, 원화) 기준으로 환산하여 비교합니다. "
+                "특정 통화로 표시한 금만 오르는 것이 아니라 **모든 통화 기준 금 가격이 우상향하고 있다면**, "
+                "이는 특정 국가의 통화 약세가 아닌 '글로벌 화폐 가치 하락 및 금 자체의 구조적 대세 상승장'임을 완벽히 입증합니다."
+            )
+            
+            three_years_ago = datetime.datetime.now() - datetime.timedelta(days=365*3)
+            sub_df = adv_df[adv_df.index >= three_years_ago].copy()
+            
+            if not sub_df.empty:
+                sub_df['Gold_USD'] = sub_df['Gold']
+                sub_df['Gold_JPY'] = sub_df['Gold'] * sub_df['USD_JPY']
+                sub_df['Gold_EUR'] = sub_df['Gold'] * sub_df['USD_EUR']
+                sub_df['Gold_CNY'] = sub_df['Gold'] * sub_df['USD_CNY']
+                sub_df['Gold_KRW'] = sub_df['Gold'] * sub_df['USD_KRW']
+                
+                norm_cols = ['Gold_USD', 'Gold_JPY', 'Gold_EUR', 'Gold_CNY', 'Gold_KRW']
+                normalized = (sub_df[norm_cols] / sub_df[norm_cols].iloc[0]) * 100
+                
+                fig_glob = go.Figure()
+                fig_glob.add_trace(go.Scatter(x=normalized.index, y=normalized['Gold_USD'], name="금 (USD 기준)", line=dict(color="#FFD700", width=2)))
+                fig_glob.add_trace(go.Scatter(x=normalized.index, y=normalized['Gold_KRW'], name="금 (KRW 기준)", line=dict(color="#FF4B4B", width=1.5)))
+                fig_glob.add_trace(go.Scatter(x=normalized.index, y=normalized['Gold_JPY'], name="금 (JPY 기준)", line=dict(color="#AB63FA", width=1.2, dash="dot")))
+                fig_glob.add_trace(go.Scatter(x=normalized.index, y=normalized['Gold_EUR'], name="금 (EUR 기준)", line=dict(color="#19D3F3", width=1.2, dash="dash")))
+                fig_glob.add_trace(go.Scatter(x=normalized.index, y=normalized['Gold_CNY'], name="금 (CNY 기준)", line=dict(color="#00CC96", width=1.2, dash="dashdot")))
+                
+                fig_glob.update_layout(
+                    height=380, margin=dict(l=10, r=10, t=10, b=10), hovermode="x unified",
+                    legend=dict(orientation="h", y=1.1), yaxis=dict(title="누적 상승률 (3년 전 = 100)")
+                )
+                st.plotly_chart(fig_glob, use_container_width=True)
+            else:
+                st.info("비교할 과거 화폐 데이터가 부족합니다.")
+                
+            st.markdown("---")
+            
+            # 6. 실질금리 디커플링 프리미엄
+            st.markdown("##### 🦅 실질금리 vs 금 가격 디커플링 프리미엄 (2022 ~ 현재)")
+            st.markdown(
+                "과거 금은 10년물 실질금리(TIPS)와 매우 강력한 역의 상관관계(금리가 내리면 금은 상승)를 보였습니다. "
+                "그러나 2022년 연준의 긴축 개시 이후 실질금리가 2.5% 수준까지 폭등했음에도 불구하고, "
+                "금은 역사적 고점을 새로 쓰고 있습니다. 이 **탈동조화 프리미엄 영역(Divergence Premium)**은 "
+                "중앙은행들의 달러 외환보유고 다변화(탈달러화) 및 지정학적 화폐 시스템 개편 수요의 크기를 투영합니다."
+            )
+            
+            if not fred_df.empty:
+                div_df = adv_df[['Gold']].join(fred_df[['DFII10']], how='inner').dropna()
+                start_2022_dates = div_df[div_df.index >= '2022-01-01'].index
+                if len(start_2022_dates) > 0:
+                    base_date = start_2022_dates[0]
+                    base_gold = div_df.loc[base_date, 'Gold']
+                    base_tips_val = 3.0 - div_df.loc[base_date, 'DFII10']
+                    
+                    div_df['Norm_Gold'] = (div_df['Gold'] / base_gold) * 100
+                    div_df['Norm_Reversed_TIPS'] = ((3.0 - div_df['DFII10']) / base_tips_val) * 100
+                    div_df['Premium'] = div_df['Norm_Gold'] - div_df['Norm_Reversed_TIPS']
+                    
+                    fig_div = go.Figure()
+                    fig_div.add_trace(go.Scatter(x=div_df.index, y=div_df['Norm_Gold'], name="실제 금 가격 지수", line=dict(color="#FFD700", width=2)))
+                    fig_div.add_trace(go.Scatter(x=div_df.index, y=div_df['Norm_Reversed_TIPS'], name="실질금리 반비례 이론가 지수", line=dict(color="#1f77b4", width=1.5, dash="dash")))
+                    
+                    fig_div.add_trace(go.Scatter(
+                        x=div_df.index,
+                        y=div_df['Norm_Gold'],
+                        mode='lines',
+                        line=dict(width=0),
+                        showlegend=False
+                    ))
+                    fig_div.add_trace(go.Scatter(
+                        x=div_df.index,
+                        y=div_df['Norm_Reversed_TIPS'],
+                        mode='lines',
+                        line=dict(width=0),
+                        fill='tonexty',
+                        fillcolor='rgba(255, 215, 0, 0.25)',
+                        name="지정학 & 탈달러 디커플링 프리미엄"
+                    ))
+                    
+                    fig_div.update_layout(
+                        height=380, margin=dict(l=10, r=10, t=10, b=10), hovermode="x unified",
+                        legend=dict(orientation="h", y=1.1), yaxis=dict(title="2022년 초 기준 정규화 지수 (Base=100)")
+                    )
+                    st.plotly_chart(fig_div, use_container_width=True)
+                else:
+                    st.info("2022년 이후의 실질금리 정규화 데이터가 부족합니다.")
+            else:
+                st.info("실질금리 매크로 데이터를 병합할 수 없습니다.")
+    else:
+        st.info("고급 금 분석 지표용 데이터를 로드할 수 없습니다.")
 
 elif page == "🇰🇷 한국 주식 (KOSPI)":
     # (한국 주식 코드는 기존 그대로 유지합니다)
