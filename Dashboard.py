@@ -1368,13 +1368,42 @@ if page == "🪙 금 (Gold)":
             else:
                 st.info(f"ℹ️ **현재 금광주 밸류에이션 스프레드**: 정상 범위 내 (Z-Score: {latest_z:.2f})")
                 
-            fig_ratio = go.Figure()
-            fig_ratio.add_trace(go.Scatter(x=adv_df.index[-500:], y=adv_df['Miners_Ratio'].iloc[-500:], name="금광주/금 비율", line=dict(color="#AB63FA", width=2)))
-            fig_ratio.add_trace(go.Scatter(x=adv_df.index[-500:], y=adv_df['Miners_Mean'].iloc[-500:], name="252일 평균선", line=dict(color="#CCCCCC", dash="dot")))
-            fig_ratio.add_trace(go.Scatter(x=adv_df.index[-500:], y=adv_df['Miners_Upper'].iloc[-500:], name="밴드 상단 (+2σ)", line=dict(color="#EF553B", width=1, dash="dash")))
-            fig_ratio.add_trace(go.Scatter(x=adv_df.index[-500:], y=adv_df['Miners_Lower'].iloc[-500:], name="밴드 하단 (-2σ)", line=dict(color="#00CC96", width=1, dash="dash")))
-            fig_ratio.update_layout(height=350, margin=dict(l=10, r=10, t=10, b=10), hovermode="x unified", legend=dict(orientation="h", y=1.1))
-            st.plotly_chart(fig_ratio, use_container_width=True)
+            fig_miners = make_subplots(
+                rows=2, cols=1,
+                shared_xaxes=True,
+                vertical_spacing=0.06,
+                row_heights=[0.6, 0.4],
+                specs=[[{"secondary_y": True}], [{"secondary_y": False}]],
+                subplot_titles=("1. 금 현물(GC=F) vs 금광주(GDX) 개별 주가 추이 (이중 Y축)", "2. 금광주 / 금 밸류에이션 비율 (Bollinger Bands)")
+            )
+            
+            # Row 1: Gold Spot (Left Y) & GDX (Right Y)
+            fig_miners.add_trace(
+                go.Scatter(x=adv_df.index[-500:], y=adv_df['Gold'].iloc[-500:], name="금 현물 ($/oz)", line=dict(color="#FFD700", width=2)),
+                row=1, col=1, secondary_y=False
+            )
+            fig_miners.add_trace(
+                go.Scatter(x=adv_df.index[-500:], y=adv_df['Miners'].iloc[-500:], name="금광주 GDX ($)", line=dict(color="#00CC96", width=2)),
+                row=1, col=1, secondary_y=True
+            )
+            
+            # Row 2: GDX / Gold Ratio + Bollinger Bands
+            fig_miners.add_trace(go.Scatter(x=adv_df.index[-500:], y=adv_df['Miners_Ratio'].iloc[-500:], name="금광주/금 비율", line=dict(color="#AB63FA", width=2)), row=2, col=1)
+            fig_miners.add_trace(go.Scatter(x=adv_df.index[-500:], y=adv_df['Miners_Mean'].iloc[-500:], name="252일 평균선", line=dict(color="#CCCCCC", dash="dot")), row=2, col=1)
+            fig_miners.add_trace(go.Scatter(x=adv_df.index[-500:], y=adv_df['Miners_Upper'].iloc[-500:], name="밴드 상단 (+2σ)", line=dict(color="#EF553B", width=1, dash="dash")), row=2, col=1)
+            fig_miners.add_trace(go.Scatter(x=adv_df.index[-500:], y=adv_df['Miners_Lower'].iloc[-500:], name="밴드 하단 (-2σ)", line=dict(color="#00CC96", width=1, dash="dash")), row=2, col=1)
+            
+            fig_miners.update_yaxes(title_text="금 현물 ($/oz)", row=1, col=1, secondary_y=False)
+            fig_miners.update_yaxes(title_text="금광주 GDX ($)", row=1, col=1, secondary_y=True)
+            fig_miners.update_yaxes(title_text="비율 (Ratio)", row=2, col=1)
+            
+            fig_miners.update_layout(
+                height=520,
+                margin=dict(l=10, r=10, t=30, b=10),
+                hovermode="x unified",
+                legend=dict(orientation="h", y=1.08)
+            )
+            st.plotly_chart(fig_miners, use_container_width=True)
             
         with tab_tech2:
             # 3. 금/은 교환 비율 (GSR) 및 은 RSI 탐욕 시그널
