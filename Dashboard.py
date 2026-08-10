@@ -43,19 +43,43 @@ try:
 except Exception:
     pass
 
+# Auto-scroll handler if section query param is present
+try:
+    url_section_code = st.query_params.get("section")
+    if url_section_code:
+        import streamlit.components.v1 as components
+        components.html(
+            f"""
+            <script>
+                setTimeout(function() {{
+                    var el = window.parent.document.getElementById('{url_section_code}');
+                    if (!el) {{
+                        el = window.parent.document.querySelector('[id*="{url_section_code}"]');
+                    }}
+                    if (el) {{
+                        el.scrollIntoView({{behavior: 'smooth', block: 'start'}});
+                    }}
+                }}, 800);
+            </script>
+            """,
+            height=0
+        )
+except Exception:
+    pass
+
 def render_copy_link_button(page_code, section_code=None, label="🔗 직통 링크 복사"):
     """
     1클릭 복사 가능한 직통 URL 쿼리 팝오버 위젯을 생성합니다.
     """
     params = f"?page={page_code}"
     if section_code:
-        params += f"&section={section_code}"
+        params += f"&section={section_code}#{section_code}"
     
     with st.popover(label, use_container_width=False):
         st.markdown(f"**📌 {label}**")
         st.write("아래 파라미터가 포함된 코드를 복사하여 공유하면 이 항목으로 바로 접속됩니다:")
         st.code(params, language="text")
-        st.caption("💡 대시보드 URL 주소 뒤에 위 쿼리를 붙여 접속하시면 해당 탭/섹션으로 즉시 이동합니다.")
+        st.caption("💡 대시보드 URL 주소 뒤에 위 쿼리를 붙여 접속하시면 해당 항목 위치로 자동 스크롤됩니다.")
 
 # ==========================================
 # 2. 금 (Gold) 페이지 함수 모음
@@ -1234,6 +1258,7 @@ if page == "🪙 금 (Gold)":
     from plotly.subplots import make_subplots
 
     st.markdown("---")
+    st.markdown("<div id='advanced' style='scroll-margin-top: 80px;'></div>", unsafe_allow_html=True)
     h_col1, h_col2 = st.columns([3, 1])
     with h_col1:
         st.subheader("🔍 금 심층 분석 & 기술적 시그널 (Advanced Quantitative Signals)")
@@ -2238,6 +2263,7 @@ elif page == "📊 매크로 대시보드":
         # 5. 인플레이션 나침반 (The Inflation Compass)
         # ---------------------------------------------
         st.markdown("---")
+        st.markdown("<div id='compass' style='scroll-margin-top: 80px;'></div>", unsafe_allow_html=True)
         h_col1, h_col2 = st.columns([3, 1])
         with h_col1:
             st.subheader("🧭 4단계: 인플레이션 나침반 (David Varadi Dynamic Compass)")
