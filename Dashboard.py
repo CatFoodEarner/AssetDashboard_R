@@ -2412,45 +2412,76 @@ elif page == "📊 매크로 대시보드":
                             "- [60일 모멘텀] OR [섹터 상대강도 기울기] 중 하나 이상이 양수(+)이면 **Inflation-On**으로 최종 판정됩니다.")
                             
             with ctab2:
-                st.markdown("##### ⏳ 최근 3년간 인플레이션 나침반 국면 변천사")
+                st.markdown("##### ⏳ 최근 3년간 자산별 성과 및 매크로 국면 타임라인 (Regime Ribbon)")
+                st.markdown(
+                    "상단 차트는 3년 전 기준(Base=100)으로 정규화된 S&P 500(`SPY`), 200일 이평선, "
+                    "그리고 각 국면별 핵심 자산(기술주 `XLK`, 에너지 `XLE`, 유틸리티 `XLU`, 필수소비재 `XLP`, 미국 중기채 `IEF`)의 누적 성과 추이입니다. "
+                    "하단 밴드(Ribbon)는 해당 일자에 나침반 모델이 판정한 실시간 매크로 국면 색상을 직관적으로 보여줍니다."
+                )
                 
                 three_years = datetime.datetime.now() - datetime.timedelta(days=365*3)
                 sub_cp = compass_df[compass_df.index >= three_years].copy()
                 
                 if not sub_cp.empty:
-                    fig_time = go.Figure()
-                    color_map = {
-                        "Goldilocks (골디락스)": "#00CC96",
-                        "Reflation (리플레이션)": "#FF4B4B",
-                        "Stagflation (스태그플레이션)": "#AB63FA",
-                        "Slowdown (디스인플레이션 둔화)": "#19D3F3"
+                    # Normalize assets to 100 at start date
+                    norm_cols = ['SPY', 'XLK', 'XLE', 'XLU', 'XLP', 'IEF']
+                    norm_df = (sub_cp[norm_cols] / sub_cp[norm_cols].iloc[0]) * 100
+                    norm_df['SPY_200SMA'] = (sub_cp['SPY_200SMA'] / sub_cp['SPY'].iloc[0]) * 100
+                    
+                    # Numeric mapping for Regime Ribbon
+                    regime_num_map = {
+                        "Goldilocks (골디락스)": 1,
+                        "Reflation (리플레이션)": 2,
+                        "Stagflation (스태그플레이션)": 3,
+                        "Slowdown (디스인플레이션 둔화)": 4
                     }
+                    sub_cp['Regime_Num'] = sub_cp['Regime'].map(regime_num_map)
                     
-                    for reg_name, color in color_map.items():
-                        reg_mask = sub_cp['Regime'] == reg_name
-                        fig_time.add_trace(go.Scatter(
-                            x=sub_cp.index[reg_mask],
-                            y=sub_cp['SPY'][reg_mask],
-                            mode='markers',
-                            name=reg_name,
-                            marker=dict(color=color, size=6)
-                        ))
-                        
-                    fig_time.add_trace(go.Scatter(
-                        x=sub_cp.index,
-                        y=sub_cp['SPY_200SMA'],
-                        name='SPY 200 SMA',
-                        line=dict(color='#FFA500', dash='dash', width=2)
-                    ))
-                    
-                    fig_time.update_layout(
-                        height=350,
-                        margin=dict(l=10, r=10, t=10, b=10),
-                        hovermode="x unified",
-                        yaxis_title="S&P 500 주가 ($)",
-                        legend=dict(orientation="h", y=1.15)
+                    fig_multi = make_subplots(
+                        rows=2, cols=1,
+                        shared_xaxes=True,
+                        vertical_spacing=0.03,
+                        row_heights=[0.82, 0.18],
+                        subplot_titles=("자산별 정규화 수익률 (Base=100)", "실시간 매크로 국면 타임라인 (Regime Ribbon)")
                     )
-                    st.plotly_chart(fig_time, use_container_width=True)
+                    
+                    # Top Chart: Normalized Assets & 200 SMA
+                    fig_multi.add_trace(go.Scatter(x=norm_df.index, y=norm_df['SPY'], name="S&P 500 (SPY)", line=dict(color="#FFD700", width=2.5)), row=1, col=1)
+                    fig_multi.add_trace(go.Scatter(x=norm_df.index, y=norm_df['SPY_200SMA'], name="SPY 200 SMA", line=dict(color="#FFA500", dash="dash", width=1.5)), row=1, col=1)
+                    fig_multi.add_trace(go.Scatter(x=norm_df.index, y=norm_df['XLK'], name="기술주 (XLK)", line=dict(color="#00CC96", width=1.5)), row=1, col=1)
+                    fig_multi.add_trace(go.Scatter(x=norm_df.index, y=norm_df['XLE'], name="에너지 (XLE)", line=dict(color="#FF4B4B", width=1.5)), row=1, col=1)
+                    fig_multi.add_trace(go.Scatter(x=norm_df.index, y=norm_df['XLU'], name="유틸리티 (XLU)", line=dict(color="#AB63FA", width=1.5)), row=1, col=1)
+                    fig_multi.add_trace(go.Scatter(x=norm_df.index, y=norm_df['XLP'], name="필수소비재 (XLP)", line=dict(color="#19D3F3", width=1.5)), row=1, col=1)
+                    fig_multi.add_trace(go.Scatter(x=norm_df.index, y=norm_df['IEF'], name="미국 중기채 (IEF)", line=dict(color="#FFA15A", width=1.5, dash="dot")), row=1, col=1)
+                    
+                    # Bottom Chart: Heatmap for Regime Ribbon
+                    colorscale = [
+                        [0.0, "#00CC96"], [0.25, "#00CC96"],  # Goldilocks
+                        [0.25, "#FF4B4B"], [0.5, "#FF4B4B"],   # Reflation
+                        [0.5, "#AB63FA"], [0.75, "#AB63FA"],  # Stagflation
+                        [0.75, "#19D3F3"], [1.0, "#19D3F3"]   # Slowdown
+                    ]
+                    
+                    fig_multi.add_trace(
+                        go.Heatmap(
+                            z=[sub_cp['Regime_Num'].values],
+                            x=sub_cp.index,
+                            y=["매크로 국면"],
+                            colorscale=colorscale,
+                            showscale=False,
+                            hoverinfo="x+text",
+                            text=[sub_cp['Regime'].values]
+                        ),
+                        row=2, col=1
+                    )
+                    
+                    fig_multi.update_layout(
+                        height=500,
+                        margin=dict(l=10, r=10, t=30, b=10),
+                        hovermode="x unified",
+                        legend=dict(orientation="h", y=1.12)
+                    )
+                    st.plotly_chart(fig_multi, use_container_width=True)
                 else:
                     st.info("표시할 국면 히스토리 데이터가 부족합니다.")
         else:
