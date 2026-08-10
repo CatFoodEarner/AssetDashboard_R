@@ -1,6 +1,7 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+import numpy as np
 import requests
 from bs4 import BeautifulSoup
 import datetime
@@ -243,6 +244,35 @@ def load_macro_data():
     except Exception as e:
         st.error(f"매크로 데이터 가공 에러: {e}")
         return pd.DataFrame(), pd.Series()
+
+@st.cache_data(ttl=21600)
+def load_inflation_compass_data():
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            etf_tickers = ["SPY", "XLE", "XLI", "XLF", "XLB", "XLU", "XLV", "XLP", "XLK", "IEF"]
+            data = {}
+            for t in etf_tickers:
+                hist = yf.Ticker(t).history(period="10y")['Close']
+                hist.index = pd.to_datetime(hist.index).tz_localize(None).normalize()
+                data[t] = hist
+                
+            df_etf = pd.DataFrame(data)
+            t5yie = fdr.DataReader('FRED:T5YIE')
+            t5yie.index = pd.to_datetime(t5yie.index).tz_localize(None).normalize()
+            if isinstance(t5yie, pd.DataFrame):
+                t5yie_s = t5yie.iloc[:, 0]
+            else:
+                t5yie_s = t5yie
+                
+            df = df_etf.join(pd.DataFrame({'T5YIE': t5yie_s}), how='inner').ffill().dropna()
+            return df
+        except Exception as e:
+            if attempt < max_retries - 1:
+                time.sleep(2)
+            else:
+                st.error(f"인플레이션 나침반 데이터 로드 실패: {e}")
+                return pd.DataFrame()
     
 # 국내 금 현재가 크롤링
 # 2. 국내 금 현재가 크롤링 (네이버 모바일 증권 - KRX 고유 코드 활용)
@@ -2140,8 +2170,201 @@ elif page == "📊 매크로 대시보드":
             st.write("  - 한국 주식 시장(KOSPI)에서 외국인 수급 이탈을 자극하는 요인이 됩니다.")
             st.write("- **환율 하락 (원화 강세 / 달러 약세)**")
             st.write("  - 글로벌 위험 선호(경기 호황) 국면에서 자금이 한국 등 신흥국으로 유입될 때 하락합니다.")
+            st.write("  - 글로벌 위험 선호(경기 호황) 국면에서 자금이 한국 등 신흥국으로 유입될 때 하락합니다.")
             st.write("  - 국내 주식 비중을 늘리기 좋은 거시경제 환경을 조성합니다.")
             
+        # ---------------------------------------------
+        # 5. 인플레이션 나침반 (The Inflation Compass)
+        # ---------------------------------------------
+        st.markdown("---")
+        st.subheader("🧭 4단계: 인플레이션 나침반 (David Varadi Dynamic Compass)")
+        st.markdown(
+            "데이비드 바라디(David Varadi, MBA, CFA)의 **인플레이션 나침반 모델**입니다. "
+            "미국 채권 시장의 5년 기대 인플레이션(`FRED: T5YIE`)과 S&P 500의 200일 추세를 조합하여 "
+            "경제의 4대 거시적 국면(리플레이션, 골디락스, 스태그플레이션, 디스인플레이션)을 실시간 판독하고 최적 섹터/자산으로 동적 로테이션합니다."
+        )
+        
+        compass_df = load_inflation_compass_data()
+        if not compass_df.empty:
+            # 1. Logic Calculation
+            compass_df['SPY_200SMA'] = compass_df['SPY'].rolling(200).mean()
+            compass_df['Growth_Up'] = compass_df['SPY'] > compass_df['SPY_200SMA']
+            compass_df['Level_On'] = compass_df['T5YIE'] > 2.0
+            compass_df['BE_Mom'] = compass_df['T5YIE'] > compass_df['T5YIE'].shift(60)
+            
+            pos_ret = 0.5 * compass_df['XLE'].pct_change() + (1/6)*compass_df['XLI'].pct_change() + (1/6)*compass_df['XLF'].pct_change() + (1/6)*compass_df['XLB'].pct_change()
+            neg_ret = (1/3) * compass_df['XLU'].pct_change() + (1/3)*compass_df['XLV'].pct_change() + (1/3)*compass_df['XLP'].pct_change()
+            pos_cum = (1 + pos_ret.fillna(0)).cumprod()
+            neg_cum = (1 + neg_ret.fillna(0)).cumprod()
+            compass_df['Ratio'] = pos_cum / neg_cum
+            
+            weights_x = np.arange(60)
+            def calc_slope(window):
+                if len(window) < 60: return np.nan
+                sum_y = np.sum(window)
+                sum_xy = np.dot(weights_x, window)
+                return (60 * sum_xy - 1770 * sum_y) / 1079700.0
+                
+            compass_df['Slope'] = compass_df['Ratio'].rolling(60).apply(calc_slope, raw=True)
+            compass_df['Asset_Mom'] = compass_df['Slope'] > 0
+            compass_df['Inflation_On'] = compass_df['Level_On'] & (compass_df['BE_Mom'] | compass_df['Asset_Mom'])
+            
+            def get_regime(row):
+                if pd.isna(row['Growth_Up']) or pd.isna(row['Inflation_On']):
+                    return "Unknown", "N/A", "⚪", "데이터 준비 중", "#CCCCCC"
+                if row['Growth_Up'] and row['Inflation_On']:
+                    return "Reflation (리플레이션)", "에너지 주식 (XLE 100%)", "🔥", "고성장 + 고물가 국면: 원자재 및 에너지 섹터 우위", "#FF4B4B"
+                elif row['Growth_Up'] and not row['Inflation_On']:
+                    return "Goldilocks (골디락스)", "기술주 (XLK 100%)", "✨", "고성장 + 저물가 국면: 혁신 기술주 및 빅테크 밸류에이션 확장", "#00CC96"
+                elif not row['Growth_Up'] and row['Inflation_On']:
+                    return "Stagflation (스태그플레이션)", "유틸리티 (XLU 100%)", "🛡️", "저성장 + 고물가 국면: 경기 방어 및 요금 인상 전가 유틸리티 우위", "#AB63FA"
+                else:
+                    return "Slowdown (디스인플레이션 둔화)", "필수소비재(XLP 50%) + 미국 중기채(IEF 50%)", "🧊", "저성장 + 저물가 국면: 경기 침체 및 금리 인하 수혜 방어 포트폴리오", "#19D3F3"
+                    
+            reg_list = [get_regime(r) for _, r in compass_df.iterrows()]
+            compass_df['Regime'] = [r[0] for r in reg_list]
+            compass_df['Asset'] = [r[1] for r in reg_list]
+            compass_df['Icon'] = [r[2] for r in reg_list]
+            compass_df['Desc'] = [r[3] for r in reg_list]
+            compass_df['Color'] = [r[4] for r in reg_list]
+            
+            latest_c = compass_df.iloc[-1]
+            
+            # Top Display Cards
+            cp_col1, cp_col2, cp_col3, cp_col4 = st.columns(4)
+            with cp_col1:
+                st.metric(
+                    "S&P 500 성장 신호", 
+                    "상승 추세 (Up)" if latest_c['Growth_Up'] else "하락 추세 (Down)",
+                    delta=f"현재: ${latest_c['SPY']:.1f} vs 200SMA: ${latest_c['SPY_200SMA']:.1f}"
+                )
+            with cp_col2:
+                st.metric(
+                    "5년 기대인플레이션 (T5YIE)", 
+                    f"{latest_c['T5YIE']:.2f}%",
+                    delta=f"60일 전 대비: {latest_c['T5YIE'] - compass_df['T5YIE'].iloc[-61]:+.2f}%p"
+                )
+            with cp_col3:
+                st.metric(
+                    "인플레이션 활성화 (Inflation-On)", 
+                    "ON (상승)" if latest_c['Inflation_On'] else "OFF (하락)",
+                    delta="기대인플레/섹터모멘텀 통과" if latest_c['Inflation_On'] else "물가 둔화 국면"
+                )
+            with cp_col4:
+                st.metric(
+                    "현재 매크로 국면", 
+                    f"{latest_c['Icon']} {latest_c['Regime'].split(' ')[0]}"
+                )
+                
+            st.success(
+                f"🎯 **[실시간 권장 자산배분 포지션] {latest_c['Icon']} {latest_c['Regime']}**\n\n"
+                f"- **권장 자산**: **{latest_c['Asset']}**\n"
+                f"- **국면 특성**: {latest_c['Desc']}"
+            )
+            
+            # Tab layout for details and historical timeline
+            ctab1, ctab2 = st.tabs(["📊 4국면 매트릭스 & 신호 세부 현황", "⏳ 최근 3년 국면 순환 타임라인"])
+            
+            with ctab1:
+                col_m1, col_m2 = st.columns([1, 1])
+                with col_m1:
+                    st.markdown("##### 🧭 4사분면 매크로 사분면도 (Macro Quadrant Matrix)")
+                    
+                    x_val = 1 if latest_c['Inflation_On'] else -1
+                    y_val = 1 if latest_c['Growth_Up'] else -1
+                    
+                    fig_quad = go.Figure()
+                    fig_quad.add_shape(type="rect", x0=-2, y0=0, x1=0, y1=2, fillcolor="rgba(0, 204, 150, 0.15)", line_width=0)
+                    fig_quad.add_annotation(x=-1, y=1, text="<b>Goldilocks (골디락스)</b><br>보유: XLK (기술주)", showarrow=False, font=dict(size=13, color="#00CC96"))
+                    
+                    fig_quad.add_shape(type="rect", x0=0, y0=0, x1=2, y1=2, fillcolor="rgba(255, 75, 75, 0.15)", line_width=0)
+                    fig_quad.add_annotation(x=1, y=1, text="<b>Reflation (리플레이션)</b><br>보유: XLE (에너지)", showarrow=False, font=dict(size=13, color="#FF4B4B"))
+                    
+                    fig_quad.add_shape(type="rect", x0=-2, y0=-2, x1=0, y1=0, fillcolor="rgba(25, 211, 243, 0.15)", line_width=0)
+                    fig_quad.add_annotation(x=-1, y=-1, text="<b>Slowdown (디스인플레이션)</b><br>보유: 50% XLP + 50% IEF", showarrow=False, font=dict(size=13, color="#19D3F3"))
+                    
+                    fig_quad.add_shape(type="rect", x0=0, y0=-2, x1=2, y1=0, fillcolor="rgba(171, 99, 250, 0.15)", line_width=0)
+                    fig_quad.add_annotation(x=1, y=-1, text="<b>Stagflation (스태그플레이션)</b><br>보유: XLU (유틸리티)", showarrow=False, font=dict(size=13, color="#AB63FA"))
+                    
+                    fig_quad.add_trace(go.Scatter(
+                        x=[x_val], y=[y_val],
+                        mode='markers+text',
+                        marker=dict(size=24, color=latest_c['Color'], symbol="star"),
+                        text=[f"현재 위치 ({latest_c['Icon']})"],
+                        textposition="top center",
+                        name="현재 국면"
+                    ))
+                    
+                    fig_quad.update_layout(
+                        height=350,
+                        margin=dict(l=10, r=10, t=10, b=10),
+                        xaxis=dict(title="인플레이션 (Left: Off / Right: On)", range=[-2, 2], zeroline=True, zerolinewidth=2, zerolinecolor="black", showticklabels=False),
+                        yaxis=dict(title="경제 성장 (Bottom: Down / Top: Up)", range=[-2, 2], zeroline=True, zerolinewidth=2, zerolinecolor="black", showticklabels=False),
+                        showlegend=False
+                    )
+                    st.plotly_chart(fig_quad, use_container_width=True)
+                    
+                with col_m2:
+                    st.markdown("##### 🔍 인플레이션 확정 세부 지표 (Confirmation Filters)")
+                    st.write("인플레이션 상승(Inflation-On) 신호는 다음 3가지 세부 지표의 조합으로 판별됩니다:")
+                    
+                    c_lvl = latest_c['Level_On']
+                    c_bm = latest_c['BE_Mom']
+                    c_am = latest_c['Asset_Mom']
+                    
+                    st.markdown(f"1. **기대인플레이션 레벨 (T5YIE > 2.0%)**: {'🟢 통과' if c_lvl else '🔴 미통과'} ({latest_c['T5YIE']:.2f}%)")
+                    st.markdown(f"2. **기대인플레이션 60일 모멘텀**: {'🟢 통과' if c_bm else '⚪ 미통과'} (60일 전 대비 상승 여부)")
+                    st.markdown(f"3. **인플레이션 민감 섹터 기울기 (Slope > 0)**: {'🟢 통과' if c_am else '⚪ 미통과'} (XLE, XLI, XLF 등 수혜 섹터 상대강도)")
+                    
+                    st.info("💡 **신호 결합 알고리즘:**\n"
+                            "- [레벨 조건(T5YIE > 2.0%)]을 통과하고,\n"
+                            "- [60일 모멘텀] OR [섹터 상대강도 기울기] 중 하나 이상이 양수(+)이면 **Inflation-On**으로 최종 판정됩니다.")
+                            
+            with ctab2:
+                st.markdown("##### ⏳ 최근 3년간 인플레이션 나침반 국면 변천사")
+                
+                three_years = datetime.datetime.now() - datetime.timedelta(days=365*3)
+                sub_cp = compass_df[compass_df.index >= three_years].copy()
+                
+                if not sub_cp.empty:
+                    fig_time = go.Figure()
+                    color_map = {
+                        "Goldilocks (골디락스)": "#00CC96",
+                        "Reflation (리플레이션)": "#FF4B4B",
+                        "Stagflation (스태그플레이션)": "#AB63FA",
+                        "Slowdown (디스인플레이션 둔화)": "#19D3F3"
+                    }
+                    
+                    for reg_name, color in color_map.items():
+                        reg_mask = sub_cp['Regime'] == reg_name
+                        fig_time.add_trace(go.Scatter(
+                            x=sub_cp.index[reg_mask],
+                            y=sub_cp['SPY'][reg_mask],
+                            mode='markers',
+                            name=reg_name,
+                            marker=dict(color=color, size=6)
+                        ))
+                        
+                    fig_time.add_trace(go.Scatter(
+                        x=sub_cp.index,
+                        y=sub_cp['SPY_200SMA'],
+                        name='SPY 200 SMA',
+                        line=dict(color='black', dash='dash', width=1.5)
+                    ))
+                    
+                    fig_time.update_layout(
+                        height=350,
+                        margin=dict(l=10, r=10, t=10, b=10),
+                        hovermode="x unified",
+                        yaxis_title="S&P 500 주가 ($)",
+                        legend=dict(orientation="h", y=1.15)
+                    )
+                    st.plotly_chart(fig_time, use_container_width=True)
+                else:
+                    st.info("표시할 국면 히스토리 데이터가 부족합니다.")
+        else:
+            st.info("인플레이션 나침반 데이터를 로드할 수 없습니다.")
+
         st.info("💡 **매크로 대시보드 투자 활용법:**\n"
                 "1. **추세 확인**: 생산성 그래프(우상향)를 보고 장기 투자 대상 국가의 경쟁력을 확인하세요.\n"
                 "2. **순환 분석**: 아웃풋 갭이 마이너스(-)일 때 정부/중앙은행의 부양책에 힘입어 주가가 바닥을 다질 가능성이 높으므로 분할 매수 기회로 삼으세요. 반대로 플러스(+) 영역이 깊어지면 과열을 주의해야 합니다.\n"
