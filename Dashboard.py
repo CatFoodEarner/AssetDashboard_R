@@ -14,10 +14,48 @@ import re
 st.set_page_config(page_title="Asset Factor Dashboard", layout="wide")
 
 # ==========================================
-# 1. 공통 사이드바 (메뉴 네비게이션)
+# 1. 공통 사이드바 (메뉴 네비게이션 & URL 딥링크)
 # ==========================================
+PAGE_MAP = {
+    "gold": "🪙 금 (Gold)",
+    "kospi": "🇰🇷 한국 주식 (KOSPI)",
+    "credit": "💵 단기 크레딧 (Short-term Credit)",
+    "global": "🌍 세계 주식 (Global Equity)",
+    "macro": "📊 매크로 대시보드",
+    "bubble": "👑 거장의 버블지표"
+}
+REVERSE_PAGE_MAP = {v: k for k, v in PAGE_MAP.items()}
+PAGE_NAMES = list(PAGE_MAP.values())
+
+# URL Query Parameter Sync (Deep Linking)
+url_page_code = st.query_params.get("page", "gold")
+default_idx = 0
+if url_page_code in PAGE_MAP:
+    default_idx = PAGE_NAMES.index(PAGE_MAP[url_page_code])
+
 st.sidebar.title("🧭 투자 자산 대시보드")
-page = st.sidebar.radio("자산군 선택", ["🪙 금 (Gold)", "🇰🇷 한국 주식 (KOSPI)", "💵 단기 크레딧 (Short-term Credit)", "🌍 세계 주식 (Global Equity)", "📊 매크로 대시보드", "👑 거장의 버블지표"])
+page = st.sidebar.radio("자산군 선택", PAGE_NAMES, index=default_idx)
+
+# Sync URL query params on page selection
+try:
+    if page in REVERSE_PAGE_MAP:
+        st.query_params["page"] = REVERSE_PAGE_MAP[page]
+except Exception:
+    pass
+
+def render_copy_link_button(page_code, section_code=None, label="🔗 직통 링크 복사"):
+    """
+    1클릭 복사 가능한 직통 URL 쿼리 팝오버 위젯을 생성합니다.
+    """
+    params = f"?page={page_code}"
+    if section_code:
+        params += f"&section={section_code}"
+    
+    with st.popover(label, use_container_width=False):
+        st.markdown(f"**📌 {label}**")
+        st.write("아래 파라미터가 포함된 코드를 복사하여 공유하면 이 항목으로 바로 접속됩니다:")
+        st.code(params, language="text")
+        st.caption("💡 대시보드 URL 주소 뒤에 위 쿼리를 붙여 접속하시면 해당 탭/섹션으로 즉시 이동합니다.")
 
 # ==========================================
 # 2. 금 (Gold) 페이지 함수 모음
@@ -940,7 +978,11 @@ def load_bubble_indicators_data():
 # ==========================================
 
 if page == "🪙 금 (Gold)":
-    st.title("🪙 금(Gold) 팩터 대시보드")
+    h_col1, h_col2 = st.columns([3, 1])
+    with h_col1:
+        st.title("🪙 금(Gold) 팩터 대시보드")
+    with h_col2:
+        render_copy_link_button("gold", label="🔗 금 대시보드 직통 링크")
     df = load_gold_data()
     fred_df, ief = load_macro_data()
     current_domestic_price = get_current_domestic_gold()
@@ -1192,7 +1234,11 @@ if page == "🪙 금 (Gold)":
     from plotly.subplots import make_subplots
 
     st.markdown("---")
-    st.subheader("🔍 금 심층 분석 & 기술적 시그널 (Advanced Quantitative Signals)")
+    h_col1, h_col2 = st.columns([3, 1])
+    with h_col1:
+        st.subheader("🔍 금 심층 분석 & 기술적 시그널 (Advanced Quantitative Signals)")
+    with h_col2:
+        render_copy_link_button("gold", "advanced", label="🔗 심층 분석 직통 링크")
     st.markdown(
         "금 시장의 구조적 강세 여부를 모니터링하기 위한 이평선 정배열 추세 스코어, 금광주 상대가치 스프레드, "
         "금/은 비율의 과열 탐욕 시그널, 경기 침체 선행 지표인 금/구리 비율, 그리고 글로벌 통화별 상승률을 입체적으로 분석합니다."
@@ -1471,8 +1517,11 @@ if page == "🪙 금 (Gold)":
         st.info("고급 금 분석 지표용 데이터를 로드할 수 없습니다.")
 
 elif page == "🇰🇷 한국 주식 (KOSPI)":
-    # (한국 주식 코드는 기존 그대로 유지합니다)
-    st.title("🇰🇷 한국 주식 (KOSPI) 팩터 대시보드")
+    h_col1, h_col2 = st.columns([3, 1])
+    with h_col1:
+        st.title("🇰🇷 한국 주식 (KOSPI) 팩터 대시보드")
+    with h_col2:
+        render_copy_link_button("kospi", label="🔗 KOSPI 직통 링크")
     
     # 1. 이제 모든 지수(V-KOSPI 포함)가 kr_df 하나에 담겨서 나옵니다.
     kr_df = load_korean_market_data()
@@ -1586,7 +1635,11 @@ elif page == "🇰🇷 한국 주식 (KOSPI)":
             st.info("밸류에이션 데이터를 불러오는 중입니다...")
 
 elif page == "💵 단기 크레딧 (Short-term Credit)":
-    st.title("💵 단기 크레딧(Short-term Credit) 팩터 대시보드")
+    h_col1, h_col2 = st.columns([3, 1])
+    with h_col1:
+        st.title("💵 단기 크레딧(Short-term Credit) 팩터 대시보드")
+    with h_col2:
+        render_copy_link_button("credit", label="🔗 크레딧 직통 링크")
     
     # 데이터 로드
     df_credit = load_credit_data()
@@ -1775,7 +1828,11 @@ elif page == "💵 단기 크레딧 (Short-term Credit)":
         st.error("단기 크레딧 데이터를 불러오는 데 실패했습니다.")
 
 elif page == "🌍 세계 주식 (Global Equity)":
-    st.title("🌍 세계 주식 (Global Equity) 팩터 대시보드")
+    h_col1, h_col2 = st.columns([3, 1])
+    with h_col1:
+        st.title("🌍 세계 주식 (Global Equity) 팩터 대시보드")
+    with h_col2:
+        render_copy_link_button("global", label="🔗 세계 주식 직통 링크")
     st.markdown("전 세계 주요 경제권역별 대표 주가 지수들의 성과와 상대적 모멘텀을 한눈에 비교하고 분석합니다.")
     
     with st.spinner("세계 주식 데이터를 불러오는 중..."):
@@ -1971,7 +2028,11 @@ elif page == "🌍 세계 주식 (Global Equity)":
         st.error("세계 주식 데이터를 불러오는 데 실패했습니다.")
 
 elif page == "📊 매크로 대시보드":
-    st.title("📊 글로벌 매크로 대시보드")
+    h_col1, h_col2 = st.columns([3, 1])
+    with h_col1:
+        st.title("📊 글로벌 매크로 대시보드")
+    with h_col2:
+        render_copy_link_button("macro", label="🔗 매크로 대시보드 직통 링크")
     st.markdown("경제의 장기 **'추세(Trend)'**와 단기 **'순환(Cycle)'**을 보여주는 경제 지표들을 분석하여 글로벌 금융 시장의 방향성을 조망합니다.")
     
     with st.spinner("FRED 매크로 데이터를 불러오는 중..."):
@@ -2177,7 +2238,11 @@ elif page == "📊 매크로 대시보드":
         # 5. 인플레이션 나침반 (The Inflation Compass)
         # ---------------------------------------------
         st.markdown("---")
-        st.subheader("🧭 4단계: 인플레이션 나침반 (David Varadi Dynamic Compass)")
+        h_col1, h_col2 = st.columns([3, 1])
+        with h_col1:
+            st.subheader("🧭 4단계: 인플레이션 나침반 (David Varadi Dynamic Compass)")
+        with h_col2:
+            render_copy_link_button("macro", "compass", label="🔗 나침반 직통 링크")
         st.markdown(
             "데이비드 바라디(David Varadi, MBA, CFA)의 **인플레이션 나침반 모델**입니다. "
             "미국 채권 시장의 5년 기대 인플레이션(`FRED: T5YIE`)과 S&P 500의 200일 추세를 조합하여 "
@@ -2373,7 +2438,11 @@ elif page == "📊 매크로 대시보드":
         st.error("매크로 데이터를 가져올 수 없었습니다.")
 
 elif page == "👑 거장의 버블지표":
-    st.title("👑 거장들의 버블 진단 및 대응 전략")
+    h_col1, h_col2 = st.columns([3, 1])
+    with h_col1:
+        st.title("👑 거장들의 버블 진단 및 대응 전략")
+    with h_col2:
+        render_copy_link_button("bubble", label="🔗 버블 지표 직통 링크")
     st.markdown("역사적인 투자 거장들이 사용했던 버블 신호 지표들을 최신 마켓 데이터와 비교 분석합니다.")
     
     with st.spinner("버블 지표 데이터를 불러오는 중..."):
