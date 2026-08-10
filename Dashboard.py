@@ -2298,8 +2298,8 @@ elif page == "📊 매크로 대시보드":
                     fig_quad.update_layout(
                         height=350,
                         margin=dict(l=10, r=10, t=10, b=10),
-                        xaxis=dict(title="인플레이션 (Left: Off / Right: On)", range=[-2, 2], zeroline=True, zerolinewidth=2, zerolinecolor="black", showticklabels=False),
-                        yaxis=dict(title="경제 성장 (Bottom: Down / Top: Up)", range=[-2, 2], zeroline=True, zerolinewidth=2, zerolinecolor="black", showticklabels=False),
+                        xaxis=dict(title="인플레이션 (Left: Off / Right: On)", range=[-2, 2], zeroline=True, zerolinewidth=2, zerolinecolor="#888888", showticklabels=False),
+                        yaxis=dict(title="경제 성장 (Bottom: Down / Top: Up)", range=[-2, 2], zeroline=True, zerolinewidth=2, zerolinecolor="#888888", showticklabels=False),
                         showlegend=False
                     )
                     st.plotly_chart(fig_quad, use_container_width=True)
@@ -2349,7 +2349,7 @@ elif page == "📊 매크로 대시보드":
                         x=sub_cp.index,
                         y=sub_cp['SPY_200SMA'],
                         name='SPY 200 SMA',
-                        line=dict(color='black', dash='dash', width=1.5)
+                        line=dict(color='#FFA500', dash='dash', width=2)
                     ))
                     
                     fig_time.update_layout(
