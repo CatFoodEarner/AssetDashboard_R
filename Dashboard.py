@@ -1371,8 +1371,8 @@ if page == "🪙 금 (Gold)":
             fig_miners = make_subplots(
                 rows=2, cols=1,
                 shared_xaxes=True,
-                vertical_spacing=0.06,
-                row_heights=[0.6, 0.4],
+                vertical_spacing=0.10,
+                row_heights=[0.58, 0.42],
                 specs=[[{"secondary_y": True}], [{"secondary_y": False}]],
                 subplot_titles=("1. 금 현물(GC=F) vs 금광주(GDX) 개별 주가 추이 (이중 Y축)", "2. 금광주 / 금 밸류에이션 비율 (Bollinger Bands)")
             )
@@ -1398,11 +1398,21 @@ if page == "🪙 금 (Gold)":
             fig_miners.update_yaxes(title_text="비율 (Ratio)", row=2, col=1)
             
             fig_miners.update_layout(
-                height=520,
-                margin=dict(l=10, r=10, t=30, b=10),
+                height=560,
+                margin=dict(l=10, r=10, t=75, b=10),
                 hovermode="x unified",
-                legend=dict(orientation="h", y=1.08)
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.06,
+                    xanchor="center",
+                    x=0.5
+                )
             )
+            
+            for annotation in fig_miners['layout']['annotations']:
+                annotation['yshift'] = 10
+                
             st.plotly_chart(fig_miners, use_container_width=True)
             
         with tab_tech2:
@@ -2889,4 +2899,4 @@ elif page == "👑 거장의 버블지표":
             else:
                 st.error("버핏 지수 데이터를 표시할 수 없습니다.")
     else:
-        st.error("거장의 버블지표 데이터를 로드할 수 없었습니다.")
+        st.error("거장의 버블지표 데이터를 로드할 수 없었습니다.")
