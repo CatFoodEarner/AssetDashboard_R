@@ -3,29 +3,78 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timezone, timedelta
 import os
+import yfinance as yf
 
-# --- 기존 크롤링 함수 3개 (수정 없음) ---
+# --- 지수 및 기준일 크롤링 (네이버 모바일 REST API + yfinance 2중 안전망) ---
 def get_current_korean_indices():
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+    indices = {}
+    market_date_str = None
+    
+    # 1. 1차 시도: 네이버 증권 모바일 REST API (Next.js 웹 개편과 무관하게 영구 작동)
+    symbol_map = {
+        'KOSPI': 'KOSPI',
+        'KOSDAQ': 'KOSDAQ',
+        'KOSPI200': 'KPI200'
+    }
     try:
-        url = "https://finance.naver.com/sise/"
+        for key, sym in symbol_map.items():
+            url = f"https://m.stock.naver.com/api/index/{sym}/basic"
+            res = requests.get(url, headers=headers, timeout=5)
+            if res.status_code == 200:
+                data = res.json()
+                price_str = data.get('closePrice', '').replace(',', '')
+                indices[key] = float(price_str)
+                if not market_date_str and data.get('localTradedAt'):
+                    market_date_str = data['localTradedAt'][:10]
+        if len(indices) == 3:
+            return indices, market_date_str
+    except Exception as e:
+        print(f"[API] 네이버 증권 API 에러: {e}")
+        
+    # 2. 2차 시도 (대체 백업): yfinance (^KS11, ^KQ11, ^KS200)
+    try:
+        yf_map = {'KOSPI': '^KS11', 'KOSDAQ': '^KQ11', 'KOSPI200': '^KS200'}
+        for key, sym in yf_map.items():
+            t = yf.Ticker(sym)
+            hist = t.history(period="5d")
+            if not hist.empty:
+                indices[key] = float(hist['Close'].dropna().iloc[-1])
+                if not market_date_str:
+                    market_date_str = hist.index[-1].strftime('%Y-%m-%d')
+        if len(indices) == 3:
+            return indices, market_date_str
+    except Exception as e:
+        print(f"[API] yfinance 보조 수집 에러: {e}")
+
+    return (indices if indices else None), market_date_str
+
+def get_current_kospi4():
+    # 1. yfinance 시도
+    try:
+        t = yf.Ticker("KOSPI-4.KS")
+        hist = t.history(period="5d")
+        if not hist.empty and 'Close' in hist.columns:
+            val = float(hist['Close'].dropna().iloc[-1])
+            if val > 0:
+                return val
+    except Exception:
+        pass
+        
+    # 2. Yahoo Finance 웹 스크래핑 보조 시도
+    try:
+        url = "https://finance.yahoo.com/quote/KOSPI-4.KS/"
         headers = {'User-Agent': 'Mozilla/5.0'}
         res = requests.get(url, headers=headers, timeout=5)
         soup = BeautifulSoup(res.text, 'html.parser')
-        return {
-            'KOSPI': float(soup.select_one('#KOSPI_now').text.replace(',', '')),
-            'KOSDAQ': float(soup.select_one('#KOSDAQ_now').text.replace(',', '')),
-            'KOSPI200': float(soup.select_one('#KPI200_now').text.replace(',', ''))
-        }
-    except: return None
-
-def get_current_kospi4():
-    try:
-        url = "https://finance.yahoo.com/quote/KOSPI-4.KS/"
-        headers = {'User-Agent': 'Mozilla/5.0', 'Accept': 'text/html'}
-        res = requests.get(url, headers=headers, timeout=5)
-        soup = BeautifulSoup(res.text, 'html.parser')
-        return float(soup.select_one('span[data-testid="qsp-price"]').text.replace(',', ''))
-    except: return None
+        price_el = soup.select_one('fin-streamer[data-field="regularMarketPrice"]') or soup.select_one('span[data-testid="qsp-price"]')
+        if price_el:
+            return float(price_el.text.replace(',', ''))
+    except Exception:
+        pass
+    return None
 
 # --- V-KOSPI 크롤링 (Investing.com Cloudflare 우회 버전) ---
 def get_current_vkospi():
@@ -60,13 +109,12 @@ def get_current_vkospi():
 
 # --- 궁극의 업데이트 로직 (시간 지연 완벽 방어) ---
 def update_csv():
-    # 1. 네이버 증권에서 '실제로 장이 열린 기준일' 가져오기 (진실의 시계)
-    url = "https://finance.naver.com/sise/"
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    res = requests.get(url, headers=headers, timeout=5)
-    soup = BeautifulSoup(res.text, 'html.parser')
+    # 1. 지수 및 '실제로 장이 열린 기준일' 가져오기 (진실의 시계)
+    kr, market_date_str = get_current_korean_indices()
     
-    market_date_str = soup.select_one('#time1').text.strip()[:10].replace('.', '-')
+    if not market_date_str:
+        kst_tz = timezone(timedelta(hours=9))
+        market_date_str = datetime.now(kst_tz).strftime('%Y-%m-%d')
     
     # 💡 봇의 실행 시간이 아닌, '시장이 열린 날짜'를 인덱스 이름표로 무조건 사용합니다!
     market_dt = pd.to_datetime(market_date_str) 
@@ -80,11 +128,10 @@ def update_csv():
     df = df.set_index('Date')
 
     # 3. 크롤링 시도
-    kr = get_current_korean_indices()
     ko4 = get_current_kospi4()
     vk = get_current_vkospi() # (우회 도구 적용된 함수)
     
-    print(f"[STATUS] 수집 상태 -> 네이버: {kr is not None}, 야후: {ko4 is not None}, V-KOSPI: {vk is not None}")
+    print(f"[STATUS] 수집 상태 -> 한국 지수: {kr is not None}, KOSPI4: {ko4 is not None}, V-KOSPI: {vk is not None}")
 
     # 4. 데이터 덮어쓰기 (핵심: today_dt가 아니라 market_dt 위치에 넣습니다)
     if kr:
