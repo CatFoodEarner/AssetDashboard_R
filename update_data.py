@@ -3,7 +3,6 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timezone, timedelta
 import os
-import yfinance as yf
 
 # --- 지수 및 기준일 크롤링 (네이버 모바일 REST API + yfinance 2중 안전망) ---
 def get_current_korean_indices():
@@ -36,6 +35,7 @@ def get_current_korean_indices():
         
     # 2. 2차 시도 (대체 백업): yfinance (^KS11, ^KQ11, ^KS200)
     try:
+        import yfinance as yf
         yf_map = {'KOSPI': '^KS11', 'KOSDAQ': '^KQ11', 'KOSPI200': '^KS200'}
         for key, sym in yf_map.items():
             t = yf.Ticker(sym)
@@ -54,6 +54,7 @@ def get_current_korean_indices():
 def get_current_kospi4():
     # 1. yfinance 시도
     try:
+        import yfinance as yf
         t = yf.Ticker("KOSPI-4.KS")
         hist = t.history(period="5d")
         if not hist.empty and 'Close' in hist.columns:
