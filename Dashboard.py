@@ -126,7 +126,7 @@ def load_gold_advanced_data():
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            tickers = ["GC=F", "SI=F", "HG=F", "GDX", "JPY=X", "EUR=X", "CNY=X", "KRW=X"]
+            tickers = ["GC=F", "SI=F", "HG=F", "GDX", "JPY=X", "EUR=X", "CNY=X", "KRW=X", "IEF"]
             data = {}
             for t in tickers:
                 history = yf.Ticker(t).history(period="10y")['Close']
@@ -144,7 +144,8 @@ def load_gold_advanced_data():
                 'JPY=X': 'USD_JPY',
                 'EUR=X': 'USD_EUR',
                 'CNY=X': 'USD_CNY',
-                'KRW=X': 'USD_KRW'
+                'KRW=X': 'USD_KRW',
+                'IEF': 'Treasury'
             })
             return df
         except Exception as e:
@@ -1271,10 +1272,11 @@ if page == "🪙 금 (Gold)":
 
     adv_df = load_gold_advanced_data()
     if not adv_df.empty:
-        tab_tech1, tab_tech2, tab_tech3 = st.tabs([
+        tab_tech1, tab_tech2, tab_tech3, tab_tech4 = st.tabs([
             "📈 추세 & 금광주 스프레드", 
             "⚖️ 금/은 (GSR) & 금/구리 (GCR)", 
-            "🌎 글로벌 통화 & 실질금리 디커플링"
+            "🌎 글로벌 통화 & 실질금리 디커플링",
+            "🧭 크로스에셋 금 국면 (Quantpedia)"
         ])
         
         with tab_tech1:
@@ -1577,6 +1579,242 @@ if page == "🪙 금 (Gold)":
                     st.info("2022년 이후의 실질금리 정규화 데이터가 부족합니다.")
             else:
                 st.info("실질금리 매크로 데이터를 병합할 수 없습니다.")
+        
+        with tab_tech4:
+            st.markdown("<div id='regime' style='scroll-margin-top: 80px;'></div>", unsafe_allow_html=True)
+            rq_col1, rq_col2 = st.columns([3, 1])
+            with rq_col1:
+                st.markdown("##### 🧭 크로스에셋(금-미국채) 4대 국면 모델 (Quantpedia)")
+            with rq_col2:
+                render_copy_link_button("gold", "regime", label="🔗 국면 분석 직통 링크")
+
+            st.markdown(
+                "금은 배당이나 이자가 없는 실물 안전자산이므로 **실질금리(Real Interest Rate)와 채권 기회비용**이 중장기 사이클의 본질적인 핵심 동인입니다.<br>"
+                "Quantpedia 연구(*[Cross-Asset Price-Based Regimes for Gold](https://quantpedia.com/cross-asset-price-based-regimes-for-gold/)*)에 따르면, "
+                "미국 중기채(**IEF**, 7-10Y 국채)의 12개월 모멘텀은 실질금리 방향성과 연준의 통화정책 기조(완화/긴축)를 판별하는 강력한 선행 지표입니다.<br>"
+                "**State 1 (금 12M > 0 AND IEF 12M > 0)**일 때만 실질금리 하락 및 채권-금 동반 강세 국면으로 판정하여 **금 100% 매수(Long)**하고, "
+                "그 외 3개 국면(State 2, 3, 4)에서는 금을 매수하지 않고 **현금(Cash)을 보유**하여 하방 리스크를 기계적으로 차단합니다.",
+                unsafe_allow_html=True
+            )
+
+            if 'Treasury' in adv_df.columns and not adv_df['Treasury'].isna().all():
+                # 1. 모멘텀 지표 산출 (12개월 = 252 영업일)
+                adv_df['Gold_Mom_12M'] = adv_df['Gold'].pct_change(252)
+                adv_df['IEF_Mom_12M'] = adv_df['Treasury'].pct_change(252)
+
+                # 2. 4대 매크로 국면 판정
+                cond_state = [
+                    (adv_df['Gold_Mom_12M'] > 0) & (adv_df['IEF_Mom_12M'] > 0),
+                    (adv_df['Gold_Mom_12M'] > 0) & (adv_df['IEF_Mom_12M'] <= 0),
+                    (adv_df['Gold_Mom_12M'] <= 0) & (adv_df['IEF_Mom_12M'] > 0),
+                    (adv_df['Gold_Mom_12M'] <= 0) & (adv_df['IEF_Mom_12M'] <= 0)
+                ]
+                adv_df['Regime'] = np.select(cond_state, [1, 2, 3, 4], default=np.nan)
+
+                regime_labels = {
+                    1: "State 1: 금(+) & 미국채(+) [실질금리 하락/적극매수]",
+                    2: "State 2: 금(+) & 미국채(-) [금리상승기 차별화/관망]",
+                    3: "State 3: 금(-) & 미국채(+) [디플레 침체기/관망]",
+                    4: "State 4: 금(-) & 미국채(-) [실질금리 급등/현금피신]"
+                }
+                adv_df['Regime_Name'] = adv_df['Regime'].map(regime_labels)
+
+                # 3. 실시간 현재 시그널 지표 카드
+                latest_gold_mom = adv_df['Gold_Mom_12M'].iloc[-1] * 100
+                latest_ief_mom = adv_df['IEF_Mom_12M'].iloc[-1] * 100
+                latest_regime = int(adv_df['Regime'].iloc[-1]) if not pd.isna(adv_df['Regime'].iloc[-1]) else 0
+
+                sig_c1, sig_c2, sig_c3, sig_c4 = st.columns(4)
+                with sig_c1:
+                    st.metric("금 12M 모멘텀", f"{latest_gold_mom:+.2f}%", delta="양수(상승)" if latest_gold_mom > 0 else "음수(하락)")
+                with sig_c2:
+                    st.metric("미국채(IEF) 12M 모멘텀", f"{latest_ief_mom:+.2f}%", delta="양수(완화)" if latest_ief_mom > 0 else "음수(긴축)")
+                with sig_c3:
+                    st.metric("현재 매크로 국면", f"State {latest_regime}")
+                with sig_c4:
+                    if latest_regime == 1:
+                        st.metric("전략 포지션", "🟢 금 100% 매수", delta="적극 보유")
+                    else:
+                        st.metric("전략 포지션", "⚪ 현금 100% 보유", delta="리스크 오프", delta_color="inverse")
+
+                # 국면별 맞춤 가이드 알림창
+                if latest_regime == 1:
+                    st.success(
+                        "🟢 **현재 상태: State 1 (금 강세 + 미국채 강세 / 적극 매수 포지션)**<br>"
+                        "금과 미국채의 12개월 모멘텀이 모두 양수입니다. 실질금리가 하락하고 유동성 완화 기조가 형성되어 "
+                        "금 투자가 가장 높은 위험조정수익률(Sharpe)을 달성할 수 있는 최적의 매크로 국면입니다. (금 100% 포지션 보유)",
+                        unsafe_allow_html=True
+                    )
+                elif latest_regime == 2:
+                    st.warning(
+                        "🟡 **현재 상태: State 2 (금 강세 + 미국채 약세 / 현금 관망 포지션)**<br>"
+                        "금 가격은 상승 중이나 미국채 가격이 하락(금리 상승)하고 있습니다. 금리 인상기 속 지정학/인플레 헷지로 금이 차별화 상승하고 있으나, "
+                        "실질금리 압박으로 하방 변동성 위험이 잔존하므로 퀀트 규칙상 현금(0% 익스포저)을 유지합니다.",
+                        unsafe_allow_html=True
+                    )
+                elif latest_regime == 3:
+                    st.info(
+                        "🟣 **현재 상태: State 3 (금 약세 + 미국채 강세 / 현금 관망 포지션)**<br>"
+                        "채권 금리는 하락하나 금 가격은 약세입니다. 디플레이션 침체 우려 또는 달러 강세 압력으로 금이 힘을 쓰지 못하는 국면이므로 현금을 보유합니다.",
+                        unsafe_allow_html=True
+                    )
+                elif latest_regime == 4:
+                    st.error(
+                        "🔴 **현재 상태: State 4 (금 약세 + 미국채 약세 / 현금 피신 포지션)**<br>"
+                        "금과 채권이 동반 하락하는 실질금리 급등 및 강력한 긴축 국면입니다. 모든 안전자산이 훼손되는 구간이므로 기계적으로 현금을 보유하여 자산을 방어합니다.",
+                        unsafe_allow_html=True
+                    )
+
+                with st.expander("📖 Quantpedia 4대 국면(State 1~4) 모델 메커니즘 & 원리 상세 설명"):
+                    st.markdown(
+                        """
+                        - **모델 핵심 가설**: 금의 본질적 기회비용은 **실질금리(Real Interest Rate)**입니다. 명목금리가 오르더라도 인플레이션 기대치보다 덜 오르면 금이 상승하지만, 실질금리가 오르면 이자가 없는 금은 외면받습니다.
+                        - **미국채(IEF) 12M의 역할**: 미국 7-10년 국채의 12개월 수익률이 양수이면 통화 완화 및 금리 인하 사이클(실질금리 하향 안정), 음수이면 긴축 및 금리 인상 사이클(실질금리 상방 압력)을 직관적으로 대변합니다.
+                        - **4대 국면 정의표**:
+                          | 국면 구분 | 금 12M | IEF 12M | 매크로 환경 요약 | 전략 포지션 |
+                          | :--- | :---: | :---: | :--- | :---: |
+                          | **State 1** | **+ (상승)** | **+ (상승)** | 실질금리 하락 / 통화 완화 / 금-채권 동반 강세 | **금 100% 매수** |
+                          | **State 2** | **+ (상승)** | **- (하락)** | 금리 인상기 / 금 차별화 랠리 (탈달러/인플레) | **현금 관망 (0%)** |
+                          | **State 3** | **- (하락)** | **+ (상승)** | 디플레이션 침체 우려 / 안전선호 채권 쏠림 | **현금 관망 (0%)** |
+                          | **State 4** | **- (하락)** | **- (하락)** | 실질금리 급등 / 유동성 긴축 / 자산 동반 약세 | **현금 관망 (0%)** |
+                        - **미래 참조 편향(Lookahead Bias) 제거**: 당일 종가로 국면을 판정하고 실제 매매 포지션은 다음 거래일에 진입(1-Day Lag, `shift(1)`)하도록 구현되었습니다.
+                        """
+                    )
+
+                # 4. 시그널 생성 및 일간 수익률 계산 (1일 시차 적용)
+                adv_df['Signal_Quantpedia'] = (adv_df['Regime'] == 1).astype(int).shift(1).fillna(0)
+                adv_df['Signal_Gold_Mom'] = (adv_df['Gold_Mom_12M'] > 0).astype(int).shift(1).fillna(0)
+
+                adv_df['Gold_Ret'] = adv_df['Gold'].pct_change().fillna(0)
+                adv_df['Ret_Quantpedia'] = adv_df['Signal_Quantpedia'] * adv_df['Gold_Ret']
+                adv_df['Ret_Gold_Mom'] = adv_df['Signal_Gold_Mom'] * adv_df['Gold_Ret']
+                adv_df['Ret_Gold_BH'] = adv_df['Gold_Ret']
+
+                # 5. 최근 5개년 필터링 및 누적 수익률(Base = 100) 산출
+                five_years_ago = adv_df.index[-1] - datetime.timedelta(days=365*5)
+                sub_df = adv_df[adv_df.index >= five_years_ago].copy()
+
+                if not sub_df.empty:
+                    sub_df['Cum_BH'] = (1 + sub_df['Ret_Gold_BH']).cumprod() * 100
+                    sub_df['Cum_Mom'] = (1 + sub_df['Ret_Gold_Mom']).cumprod() * 100
+                    sub_df['Cum_QP'] = (1 + sub_df['Ret_Quantpedia']).cumprod() * 100
+
+                    # 6. 2행 1열 서브플롯 (Row 1: 누적 수익률, Row 2: 국면 컬러 리본)
+                    fig_regime = make_subplots(
+                        rows=2, cols=1,
+                        shared_xaxes=True,
+                        vertical_spacing=0.08,
+                        row_heights=[0.78, 0.22],
+                        subplot_titles=(
+                            "📈 최근 5개년 3대 전략 누적 성과 비교 (Base = 100)",
+                            "🧭 실시간 4대 매크로 국면 타임라인 (Macro Regime Ribbon)"
+                        )
+                    )
+
+                    fig_regime.add_trace(
+                        go.Scatter(
+                            x=sub_df.index, y=sub_df['Cum_BH'],
+                            name="금 5년 단순 보유 (Buy & Hold)",
+                            line=dict(color="#FFD700", width=2)
+                        ),
+                        row=1, col=1
+                    )
+                    fig_regime.add_trace(
+                        go.Scatter(
+                            x=sub_df.index, y=sub_df['Cum_Mom'],
+                            name="금 단일 12M 모멘텀",
+                            line=dict(color="#FFA500", dash="dot", width=1.8)
+                        ),
+                        row=1, col=1
+                    )
+                    fig_regime.add_trace(
+                        go.Scatter(
+                            x=sub_df.index, y=sub_df['Cum_QP'],
+                            name="Quantpedia 크로스에셋 전략 (State 1 롱)",
+                            line=dict(color="#00CC96", width=2.5)
+                        ),
+                        row=1, col=1
+                    )
+
+                    # 국면별 이산형 컬러맵
+                    # State 1: 초록(#00CC96), State 2: 황색(#FFD700), State 3: 보라(#636EFA), State 4: 적색(#EF553B)
+                    colorscale_regime = [
+                        [0.0, "#00CC96"], [0.25, "#00CC96"],
+                        [0.25, "#FFD700"], [0.5, "#FFD700"],
+                        [0.5, "#636EFA"], [0.75, "#636EFA"],
+                        [0.75, "#EF553B"], [1.0, "#EF553B"]
+                    ]
+
+                    fig_regime.add_trace(
+                        go.Heatmap(
+                            z=[sub_df['Regime'].values],
+                            x=sub_df.index,
+                            y=["국면"],
+                            colorscale=colorscale_regime,
+                            zmin=1, zmax=4,
+                            showscale=False,
+                            hoverinfo="x+text",
+                            text=[sub_df['Regime_Name'].values]
+                        ),
+                        row=2, col=1
+                    )
+
+                    fig_regime.update_layout(
+                        height=560,
+                        margin=dict(l=10, r=10, t=65, b=10),
+                        hovermode="x unified",
+                        legend=dict(orientation="h", yanchor="bottom", y=1.06, xanchor="center", x=0.5)
+                    )
+                    fig_regime.update_yaxes(title_text="지수 (Base=100)", row=1, col=1)
+                    fig_regime.update_yaxes(showticklabels=False, row=2, col=1)
+
+                    for ann in fig_regime['layout']['annotations']:
+                        ann['yshift'] = 10
+
+                    st.plotly_chart(fig_regime, use_container_width=True)
+
+                    # 7. 5개년 성과 지표 비교 테이블 (KPI Summary)
+                    st.markdown("##### 📊 5개년 3대 전략 핵심 위험조정 성과 지표 비교")
+
+                    def calc_strategy_kpis(cum_s, ret_s, exposure_s):
+                        tot = (cum_s.iloc[-1] / cum_s.iloc[0] - 1) * 100
+                        n_days = len(ret_s)
+                        cagr = ((cum_s.iloc[-1] / cum_s.iloc[0]) ** (252 / n_days) - 1) * 100 if n_days > 0 and cum_s.iloc[-1] > 0 else 0
+                        vol = ret_s.std() * np.sqrt(252) * 100
+                        peak = cum_s.cummax()
+                        dd = (cum_s - peak) / peak
+                        mdd = dd.min() * 100
+                        sharpe = (ret_s.mean() / ret_s.std() * np.sqrt(252)) if ret_s.std() > 0 else 0
+                        mkt_exp = exposure_s.mean() * 100
+                        return {
+                            "총 수익률": f"{tot:+.2f}%",
+                            "CAGR (연평균복리)": f"{cagr:.2f}%",
+                            "연율화 변동성": f"{vol:.2f}%",
+                            "최대 낙폭 (MDD)": f"{mdd:.2f}%",
+                            "샤프 지수 (Sharpe)": f"{sharpe:.2f}",
+                            "시장 노출도 (비중)": f"{mkt_exp:.1f}%"
+                        }
+
+                    kpi_summary = {
+                        "Quantpedia 크로스에셋": calc_strategy_kpis(sub_df['Cum_QP'], sub_df['Ret_Quantpedia'], sub_df['Signal_Quantpedia']),
+                        "금 단일 12M 모멘텀": calc_strategy_kpis(sub_df['Cum_Mom'], sub_df['Ret_Gold_Mom'], sub_df['Signal_Gold_Mom']),
+                        "금 5년 단순 보유 (B&H)": calc_strategy_kpis(sub_df['Cum_BH'], sub_df['Ret_Gold_BH'], pd.Series(1, index=sub_df.index))
+                    }
+
+                    kpi_table_df = pd.DataFrame(kpi_summary).T
+                    st.dataframe(kpi_table_df, use_container_width=True)
+
+                    st.info(
+                        "💡 **전략 분석 및 시사점**:\n"
+                        "- **시장 노출도 vs 방어력**: Quantpedia 크로스에셋 전략은 전체 기간의 약 절반 이하의 시장 노출도만 유지하면서도, "
+                        "2022년 금리 급등기(State 2 & State 4)와 같은 실질금리 상승 위험 구간에서 현금으로 안전하게 대피하여 낙폭을 방어했습니다.\n"
+                        "- **기회비용 고려**: 최근처럼 전 세계 중앙은행의 탈달러 금 매집 및 지정학적 리스크로 금이 채권과 디커플링되어 단독 급등하는 구간(State 2)에서는 "
+                        "현금을 보유하므로 단순 보유(Buy & Hold) 대비 일부 상승분을 양보하는 트레이드오프가 존재합니다."
+                    )
+                else:
+                    st.info("최근 5개년 국면 백테스트 데이터가 부족합니다.")
+            else:
+                st.info("미국 중기채(IEF) 데이터가 로드되지 않아 크로스에셋 국면을 분석할 수 없습니다.")
     else:
         st.info("고급 금 분석 지표용 데이터를 로드할 수 없습니다.")
 
